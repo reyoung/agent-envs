@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")"/../
+
+IMAGE_REPO=${IMAGE_REPO:-"reyoung/proxy"}
+BASE_TAG=${BASE_TAG:-"0.1.0"}
+TAG_SUFFIX=${TAG_SUFFIX:-""}
+
+main() {
+	local suffix tag root
+	if [[ -n "${TAG_SUFFIX}" ]]; then
+		suffix="${TAG_SUFFIX}"
+	else
+		suffix=$(git describe --tags --always --dirty)
+		suffix=$(sanitize_tag "${suffix}")
+	fi
+	tag="${BASE_TAG}-${suffix}"
+
+	root=$(git rev-parse --show-toplevel)
+
+	echo "Building linux proxy binary with make"
+	make -C "${root}/proxy" clean
+	make -C "${root}/proxy" linux -j
+
+	echo "Building ${IMAGE_REPO}:${tag}"
+	docker build -f proxy/Dockerfile -t "${IMAGE_REPO}:${tag}" "${root}"
+
+	echo "Pushing ${IMAGE_REPO}:${tag}"
+	docker push "${IMAGE_REPO}:${tag}"
+}
+
+sanitize_tag() {
+	local input=$1
+	input=${input//\//-}
+	input=${input//[^0-9A-Za-z_.-]/-}
+	echo "${input}"
+}
+
+main "$@"

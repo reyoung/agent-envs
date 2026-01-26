@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gcc-oj
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app: gcc-oj
+  template:
+    metadata:
+      labels:
+        app: gcc-oj
+    spec:
+      volumes:
+        - name: envlet-bin
+          emptyDir: {}
+      initContainers:
+        - name: copy-envlet
+          image: "{{ .Values.envlet_image }}"
+          command:
+            - sh
+            - -c
+            - |
+              cp /usr/local/bin/envlet /shared/envlet
+              cp /usr/local/bin/judgelet /shared/judgelet
+          volumeMounts:
+            - name: envlet-bin
+              mountPath: /shared
+      containers:
+        - name: gcc-oj
+          image: "gcc:15"
+          env:
+            - name: ENVLET_GCC_REDIS_DSN
+              value: "redis://{{- if .Values.redis_password }}:{{ .Values.redis_password }}@{{- end }}{{ .Values.redis_host }}:{{ .Values.redis_port }}#{{ .Values.gcc_job_queue }}"
+          command:
+            - sh
+            - -c
+            - |
+              chmod +x /envlet/envlet
+              chmod +x /envlet/judgelet
+              exec /envlet/envlet "${ENVLET_GCC_REDIS_DSN}"
+          volumeMounts:
+            - name: envlet-bin
+              mountPath: /envlet
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: gcc-oj-scaler
+  namespace: {{ .Release.Namespace }}
+spec:
+  scaleTargetRef:
+    name: gcc-oj
+
+  minReplicaCount: 0
+  maxReplicaCount: 50
+  pollingInterval: 5      # 每 5 秒检查一次队列长度
+  cooldownPeriod: 60      # 队列变空后 60 秒再缩容（防抖）
+
+  triggers:
+    - type: redis
+      metadata:
+        address: "{{ .Values.redis_host }}:{{ .Values.redis_port }}"
+{{- if .Values.redis_password }}
+        password: "{{ .Values.redis_password }}"
+{{- end }}
+        listName: {{ .Values.gcc_job_queue }}
+        listLength: "50"             # 目标：平均每 50 个任务 -> 扩 1 个 pod
+        activationListLength: "0"    # 队列>=1 时才从 0 拉起（建议设置）
