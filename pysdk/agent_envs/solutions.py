@@ -45,6 +45,18 @@ class OJResult:
         )
 
 
+class RunProgramStatus(enum.StrEnum):
+    NORMAL = "Normal"
+    INVALID = "Invalid"
+    RUNTIME_ERROR = "Runtime Error"
+    MEMORY_LIMIT_EXCEEDED = "Memory Limit Exceeded"
+    TIME_LIMIT_EXCEEDED = "Time Limit Exceeded"
+    OUTPUT_LIMIT_EXCEEDED = "Output Limit Exceeded"
+    DISALLOWED_SYSCALL = "Disallowed Syscall"
+    FATAL_ERROR = "Fatal Error"
+    UNKNOWN = "Unknown"
+
+
 @dataclasses.dataclass(frozen=True)
 class CppOJSolution:
     results: list[OJResult]
@@ -73,7 +85,7 @@ class RunProgramSolution:
     stderr: bytes
     memory: int | None = None
     time: float | None = None
-    status: int | None = None
+    status: RunProgramStatus | None = None
     type: typing.Literal["run_program"] = "run_program"
 
 Solution = typing.Union[CppOJSolution, CompileSolution, RunProgramSolution]

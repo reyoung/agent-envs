@@ -1,9 +1,15 @@
 import json
 from .proxy_client import ExecResult
 from .problems import Problem, CppOJ, CompileCPP, RunProgram
-from .solutions import Solution, CppOJSolution, OJResult, CompileSolution, RunProgramSolution
+from .solutions import (
+    Solution,
+    CppOJSolution,
+    OJResult,
+    CompileSolution,
+    RunProgramSolution,
+    RunProgramStatus,
+)
 import functools
-import pickle
 
 
 @functools.singledispatch
@@ -59,5 +65,60 @@ async def _(problem: CompileCPP, exec_result: ExecResult) -> Solution:
 
 @parse_result.register
 async def _(run_program: RunProgram, exec_result: ExecResult) -> Solution:
-    pickle.dump((run_program, exec_result), open("run_program_debug.pkl", "wb"))
-    raise NotImplementedError("RunProgram result parsing not implemented yet.")
+    files = exec_result.file_dict()
+    runprog_result = files.get("workspace/runprog.result")
+    stdout = files.get("workspace/program.stdout", b"")
+    stderr = files.get("workspace/program.stderr", b"")
+
+    if runprog_result is None:
+        # program failed to launch or runprog crashed before writing result
+        return RunProgramSolution(
+            exit_code=exec_result.exit_code,
+            stdout=stdout,
+            stderr=stderr,
+            memory=None,
+            time=None,
+            status=RunProgramStatus.UNKNOWN,
+        )
+
+    status, time_ms, memory_kb, exit_code = _parse_runprog_result(runprog_result)
+    return RunProgramSolution(
+        exit_code=exit_code,
+        stdout=stdout,
+        stderr=stderr,
+        memory=memory_kb,
+        time=time_ms / 1000,
+        status=status,
+    )
+
+
+def _parse_runprog_result(content: bytes) -> tuple[RunProgramStatus, int, int, int]:
+    try:
+        parts = content.decode("utf-8").strip().split()
+    except UnicodeDecodeError as e:
+        raise RuntimeError("runprog.result is not valid utf-8") from e
+
+    if len(parts) != 4:
+        raise RuntimeError(f"runprog.result malformed: expected 4 space-separated integers, got {len(parts)}")
+
+    try:
+        status_code, time_ms, memory_kb, exit_code = map(int, parts)
+    except ValueError as e:
+        raise RuntimeError("runprog.result contains non-integer values") from e
+
+    status = _status_from_code(status_code)
+    return status, time_ms, memory_kb, exit_code
+
+
+def _status_from_code(code: int) -> RunProgramStatus:
+    mapping = {
+        0: RunProgramStatus.NORMAL,
+        1: RunProgramStatus.INVALID,
+        2: RunProgramStatus.RUNTIME_ERROR,
+        3: RunProgramStatus.MEMORY_LIMIT_EXCEEDED,
+        4: RunProgramStatus.TIME_LIMIT_EXCEEDED,
+        5: RunProgramStatus.OUTPUT_LIMIT_EXCEEDED,
+        6: RunProgramStatus.DISALLOWED_SYSCALL,
+        7: RunProgramStatus.FATAL_ERROR,
+    }
+    return mapping.get(code, RunProgramStatus.UNKNOWN)
