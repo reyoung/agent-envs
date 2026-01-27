@@ -8,7 +8,9 @@ import aiofiles
 import os
 import json
 import base64
+import shlex
 import dataclasses
+import shlex
 
 @dataclasses.dataclass
 class BuildBinaryResult:
@@ -52,7 +54,7 @@ else
     echo "Compilation succeeded. Removing compile_errors.txt"
     rm -f compile_errors.txt
 fi
-""".format(" ".join(source_files)))
+""".format(" ".join(shlex.quote(f) for f in source_files)))
         
         os.chmod(f"{dirpath}/build.sh", 0o755)
 
@@ -149,7 +151,7 @@ else
     echo "Compilation succeeded. Removing compile_errors.txt"
     rm -f compile_errors.txt
 fi
-""".format(" ".join(source_files)))
+""".format(" ".join(shlex.quote(f) for f in source_files)))
         
         os.chmod(f"{dirpath}/build.sh", 0o755)
         output_file = f"{dirpath}/bin"
@@ -203,7 +205,7 @@ base64 -d < input_b64 | /envlet/runprog \
     -unsafe \
     -cgroup \
     -bind-pwd \
-    $PWD/bin { " ".join(map(lambda x: "'" + x + "'", run_program.args)) if run_program.args else "" } > program.stdout 2> program.stderr
+    $PWD/bin { " ".join(map(shlex.quote, run_program.args)) if run_program.args else "" } > program.stdout 2> program.stderr
 """)
         os.chmod(f"{dirpath}/main.sh", 0o755)
 
