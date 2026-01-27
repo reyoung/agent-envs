@@ -204,7 +204,7 @@ base64 -d < input_b64 | /envlet/runprog \
     -unsafe \
     -cgroup \
     -bind-pwd \
-    $PWD/bin { " ".join(map(lambda x: "'" + x + "'", run_program.args)) if run_program.args else "" } > program.stdout 2> program.stderr
+    $PWD/bin { " ".join(shlex.quote(arg) for arg in run_program.args) if run_program.args else "" } > program.stdout 2> program.stderr
 """)
         os.chmod(f"{dirpath}/main.sh", 0o755)
 
