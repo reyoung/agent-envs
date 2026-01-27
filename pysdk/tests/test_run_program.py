@@ -1,7 +1,7 @@
 from agent_envs.proxy_client import ProxyClient
 from agent_envs.executor import Executor
 from agent_envs.problems import CompileCPP, FileContent, RunProgram
-from agent_envs.solutions import  CompileSolution
+from agent_envs.solutions import CompileSolution
 
 async def test_compile():
     cli = ProxyClient(url="http://localhost:8080/execute")
