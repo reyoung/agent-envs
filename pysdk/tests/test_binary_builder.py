@@ -1,5 +1,5 @@
 from agent_envs.binary_builder import build_binary
-from agent_envs.problems import CppOJ, FileContent, OJTestCase
+from agent_envs.problems import CppOJ, CompileCPP, FileContent, OJTestCase
 async def test_cpp_binary_builder():
 
     bin = await build_binary(
@@ -32,3 +32,23 @@ int main() {
         )
     )
     assert len(bin.binary) > 0
+
+async def test_compile_cpp_binary_builder():
+    bin = await build_binary(
+        CompileCPP(
+            files=[
+                FileContent(
+                    filename="solution.cpp",
+                    content=b"""#include <iostream>
+int main() {
+    std::cout << "Hello, World!" << std::endl;
+    return 0;
+}
+""",
+                )
+            ],
+        )
+    )
+    assert len(bin.binary) > 0
+    assert bin.capture_pattern == r"^workspace/(compile_errors\.txt|solution)$"
+    assert bin.args == ["--target", "workspace"]
