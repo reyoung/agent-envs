@@ -1,7 +1,7 @@
 from agent_envs.proxy_client import ProxyClient
 from agent_envs.executor import Executor
 from agent_envs.problems import CompileCPP, FileContent, RunProgram
-from agent_envs.solutions import CompileSolution
+from agent_envs.solutions import CompileSolution, RunProgramSolution, RunProgramStatus
 
 async def test_compile():
     cli = ProxyClient(url="http://localhost:8080/execute")
@@ -32,4 +32,7 @@ int main() {
             binary=resp.binary,
             stdin=b"3 4\n",
         ))
-    print(resp)
+    assert isinstance(resp, RunProgramSolution)
+    assert resp.stdout == b"7\n"
+    assert resp.exit_code == 0
+    assert resp.status == RunProgramStatus.NORMAL
