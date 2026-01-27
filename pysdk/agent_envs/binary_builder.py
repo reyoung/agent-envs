@@ -45,7 +45,13 @@ async def _(cpp_oj: CppOJ) -> BuildBinaryResult:
             await f.write(
                 """#!/bin/bash
 set -ex
-g++ -O2 -o solution {} -std=c++17
+if ! g++ -O2 -o solution {} -std=c++17 2> compile_errors.txt; then
+    echo "Compilation failed. See compile_errors.txt for details."
+    exit 1
+else
+    echo "Compilation succeeded. Removing compile_errors.txt"
+    rm -f compile_errors.txt
+fi
 """.format(" ".join(source_files)))
         
         os.chmod(f"{dirpath}/build.sh", 0o755)
@@ -64,7 +70,11 @@ g++ -O2 -o solution {} -std=c++17
             await f.write(
                 """#!/bin/bash
 set -ex
-/envlet/judgelet --test-bin ./solution --tests-file input_spec.jsonl > judge_result.jsonl
+ls -lha $PWD/solution
+/envlet/judgelet \
+    --runprog-bin /envlet/runprog \
+    --test-bin $PWD/solution \
+    --tests-file input_spec.jsonl | tee judge_result.jsonl
 """)
         os.chmod(f"{dirpath}/judge.sh", 0o755)
 
@@ -72,7 +82,11 @@ set -ex
             await f.write(
                 """#!/bin/bash
 set -e
-./build.sh
+if ! ./build.sh; then
+    echo "Build failed."
+    cat compile_errors.txt
+    exit 0
+fi
 ./judge.sh
 echo "=== Judge result ==="
 cat judge_result.jsonl
@@ -100,7 +114,7 @@ cat judge_result.jsonl
         async with aiofiles.open(output_file, "rb") as f:
             binary_content = await f.read()
         return BuildBinaryResult(binary=binary_content,
-                                 capture_pattern=r"^workspace/judge_result\.jsonl$",
+                                 capture_pattern=r"^workspace/(judge_result\.jsonl|compile_errors\.txt)$",
                                  args=[
                                      "--target",
                                      "workspace"

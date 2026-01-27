@@ -1,6 +1,7 @@
 from agent_envs.proxy_client import ProxyClient
 from agent_envs.executor import Executor
 from agent_envs.problems import CppOJ, FileContent, OJTestCase
+from agent_envs.solutions import OJResultStatus
 async def test_proxy_client_initialization():
     cli = ProxyClient(url="http://localhost:8080/execute")
 
@@ -34,4 +35,4 @@ int main() {
             ],
         ))
     
-    print(resp)
+    assert resp.status == OJResultStatus.AC, f"Expected AC but got {resp.results}"
