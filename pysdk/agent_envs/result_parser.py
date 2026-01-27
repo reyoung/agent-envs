@@ -1,7 +1,7 @@
 import json
 from .proxy_client import ExecResult
-from .problems import Problem, CppOJ
-from .solutions import Solution, CppOJSolution, OJResult
+from .problems import Problem, CppOJ, CompileCPP
+from .solutions import Solution, CppOJSolution, OJResult, CompileSolution
 import functools
 
 
@@ -45,3 +45,17 @@ async def _(problem: CppOJ, exec_result: ExecResult) -> Solution:
         results.append(OJResult.from_json(js_line))
     
     return CppOJSolution(results=results)
+
+@parse_result.register
+async def _(problem: CompileCPP, exec_result: ExecResult) -> Solution:
+    _ensure_succeed(exec_result)
+    compile_error_file = None
+    result_binary_file = None
+    for f in exec_result.files:
+        if f.filename.endswith("compile_errors.txt"):
+            compile_error_file = f.content.decode("utf-8")
+
+        if f.filename.endswith("solution"):
+            result_binary_file = f.content
+
+    return CompileSolution(binary=result_binary_file, compile_error=compile_error_file)

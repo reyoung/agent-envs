@@ -1,5 +1,5 @@
 import functools
-from .problems import Problem, CppOJ
+from .problems import Problem, CppOJ, CompileCPP
 import asyncio
 import contextlib
 import tempfile
@@ -59,11 +59,19 @@ fi
 
         async with aiofiles.open(f"{dirpath}/input_spec.jsonl", "w") as f:
             for test_case in cpp_oj.test_cases:
-                await f.write(json.dumps({
+                spec : dict[str, str | int] = {
                     "name": test_case.name,
                     "input": base64.b64encode(test_case.input).decode("utf-8"),
                     "output": base64.b64encode(test_case.output).decode("utf-8"),
-                }))
+                }
+
+                if test_case.time_limit is not None:
+                    spec["time_limit"] = f"{test_case.time_limit:.4f}s"
+
+                if test_case.memory_limit_in_mb is not None:
+                    spec["memory_limit_in_mb"] = test_case.memory_limit_in_mb
+
+                await f.write(json.dumps(spec))
                 await f.write("\n")
         
         async with aiofiles.open(f"{dirpath}/judge.sh", "w") as f:
@@ -119,3 +127,53 @@ cat judge_result.jsonl
                                      "--target",
                                      "workspace"
                                  ])
+
+@build_binary.register
+async def _(compile_cpp: CompileCPP) -> BuildBinaryResult:
+    with _temp_dir() as dirpath:
+        source_files = []
+
+        for file in compile_cpp.files:
+            async with aiofiles.open(f"{dirpath}/{file.filename}", "wb") as f:
+                await f.write(file.content)
+                if file.filename.endswith(".cpp") or file.filename.endswith(".c"):
+                    source_files.append(file.filename)
+        
+        async with aiofiles.open(f"{dirpath}/build.sh", "w") as f:
+            await f.write(
+                """#!/bin/bash
+set -ex
+if ! g++ -O2 -o solution {} -std=c++17 2> compile_errors.txt; then
+    echo "Compilation failed. See compile_errors.txt for details."
+else
+    echo "Compilation succeeded. Removing compile_errors.txt"
+    rm -f compile_errors.txt
+fi
+""".format(" ".join(source_files)))
+        
+        os.chmod(f"{dirpath}/build.sh", 0o755)
+        output_file = f"{dirpath}/bin"
+        proc = await asyncio.create_subprocess_exec(
+            "makeself",
+            "--gzip",
+            dirpath,
+            output_file,
+            "CPP Compile Solution",
+            "./build.sh",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            stderr_output = stderr.decode() if stderr else ""
+            raise RuntimeError(f"Failed to create self-extracting archive: {stderr_output}")
+        
+        async with aiofiles.open(output_file, "rb") as f:
+            binary_content = await f.read()
+    
+    return BuildBinaryResult(binary=binary_content,
+                            capture_pattern=r"^workspace/(compile_errors\.txt|solution)$",
+                            args=[
+                                "--target",
+                                "workspace"
+                            ])

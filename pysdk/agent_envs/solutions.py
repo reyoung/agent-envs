@@ -59,5 +59,11 @@ class CppOJSolution:
             if result.status != OJResultStatus.AC:
                 return result.status
         return OJResultStatus.AC
+    
+@dataclasses.dataclass(frozen=True)
+class CompileSolution:
+    compile_error: str | None = None
+    binary: bytes | None = None
+    type: typing.Literal["compile_cpp"] = "compile_cpp"
 
-Solution = typing.Union[CppOJSolution]
+Solution = typing.Union[CppOJSolution, CompileSolution]
