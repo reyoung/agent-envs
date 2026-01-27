@@ -25,12 +25,15 @@ spec:
             - |
               cp /usr/local/bin/envlet /shared/envlet
               cp /usr/local/bin/judgelet /shared/judgelet
+              cp /usr/local/bin/runprog /shared/runprog
           volumeMounts:
             - name: envlet-bin
               mountPath: /shared
       containers:
         - name: gcc-oj
           image: "gcc:15"
+          securityContext:
+            privileged: true
           env:
             - name: ENVLET_GCC_REDIS_DSN
               value: "redis://{{- if .Values.redis_password }}:{{ .Values.redis_password }}@{{- end }}{{ .Values.redis_host }}:{{ .Values.redis_port }}#{{ .Values.gcc_job_queue }}"
@@ -40,10 +43,12 @@ spec:
             - |
               chmod +x /envlet/envlet
               chmod +x /envlet/judgelet
+              chmod +x /envlet/runprog
               exec /envlet/envlet "${ENVLET_GCC_REDIS_DSN}"
           volumeMounts:
             - name: envlet-bin
               mountPath: /envlet
+      
 ---
 apiVersion: keda.sh/v1alpha1
 kind: ScaledObject
@@ -57,7 +62,7 @@ spec:
   minReplicaCount: 0
   maxReplicaCount: 50
   pollingInterval: 5      # 每 5 秒检查一次队列长度
-  cooldownPeriod: 60      # 队列变空后 60 秒再缩容（防抖）
+  cooldownPeriod: 60      # 队列变空后 600 秒再缩容（防抖）
 
   triggers:
     - type: redis

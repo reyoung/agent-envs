@@ -24,7 +24,7 @@ func (e *tempDirExecutor) Close() error {
 	return nil
 }
 
-func (e *tempDirExecutor) Execute(ctx context.Context, spec *jobqueue.JobSpec) (*ExecuteResult, error) {
+func (e *tempDirExecutor) Execute(ctx context.Context, spec *jobqueue.JobSpec) (result *ExecuteResult, err error) {
 	if spec == nil {
 		return nil, fmt.Errorf("job spec is nil")
 	}
@@ -38,18 +38,62 @@ func (e *tempDirExecutor) Execute(ctx context.Context, spec *jobqueue.JobSpec) (
 	}
 	defer os.RemoveAll(workdir)
 
+	defer func() {
+		if result == nil {
+			return
+		}
+		log.Printf("execution capture pattern %s", spec.CapturePattern)
+		if spec.CapturePattern != "" {
+			pattern, captureErr := regexp.Compile(spec.CapturePattern)
+			if captureErr != nil {
+				err = errors.Join(err, fmt.Errorf("compile capture pattern: %w", captureErr))
+				return
+			}
+
+			// Walk through the working directory to find matching files
+			captureErr = filepath.Walk(workdir, func(path string, info os.FileInfo, err error) error {
+				if err != nil {
+					return err
+				}
+				if info.IsDir() {
+					return nil
+				}
+				relPath, err := filepath.Rel(workdir, path)
+				if err != nil {
+					return err
+				}
+				log.Printf("checking file for capture: %s", relPath)
+				if pattern.MatchString(relPath) {
+					content, err := os.ReadFile(path)
+					if err != nil {
+						return err
+					}
+					result.Files = append(result.Files, FileContent{
+						Filename: relPath,
+						Content:  content,
+					})
+				}
+				return nil
+			})
+			if captureErr != nil {
+				err = errors.Join(err, fmt.Errorf("compile files error: %w", captureErr))
+				return
+			}
+		}
+	}()
+
 	binaryPath := filepath.Join(workdir, "job-binary")
 	if err := os.WriteFile(binaryPath, spec.Binary, 0o700); err != nil {
 		return nil, fmt.Errorf("write binary: %w", err)
 	}
 
+	result = &ExecuteResult{}
 	var stdout, stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, binaryPath, spec.Args...)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	cmd.Dir = workdir
 
-	result := &ExecuteResult{}
 	if err := cmd.Run(); err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
@@ -65,44 +109,6 @@ func (e *tempDirExecutor) Execute(ctx context.Context, spec *jobqueue.JobSpec) (
 	result.Stderr = stderr.Bytes()
 	if state := cmd.ProcessState; state != nil {
 		result.ExitCode = state.ExitCode()
-	}
-
-	log.Printf("execution capture pattern %s", spec.CapturePattern)
-
-	if spec.CapturePattern != "" {
-		pattern, err := regexp.Compile(spec.CapturePattern)
-		if err != nil {
-			return nil, fmt.Errorf("compile capture pattern: %w", err)
-		}
-
-		// Walk through the working directory to find matching files
-		err = filepath.Walk(workdir, func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return err
-			}
-			if info.IsDir() {
-				return nil
-			}
-			relPath, err := filepath.Rel(workdir, path)
-			if err != nil {
-				return err
-			}
-			log.Printf("checking file for capture: %s", relPath)
-			if pattern.MatchString(relPath) {
-				content, err := os.ReadFile(path)
-				if err != nil {
-					return err
-				}
-				result.Files = append(result.Files, FileContent{
-					Filename: relPath,
-					Content:  content,
-				})
-			}
-			return nil
-		})
-		if err != nil {
-			return nil, fmt.Errorf("capture files: %w", err)
-		}
 	}
 
 	return result, nil

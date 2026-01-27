@@ -1,0 +1,3 @@
+[submodule "envlet/3rd/go-sandbox"]
+	path = envlet/3rd/go-sandbox
+	url = https://github.com/reyoung/go-sandbox.git

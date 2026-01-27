@@ -16,24 +16,29 @@ import (
 )
 
 type TestSpec struct {
-	Input  []byte `json:"input"`
-	Output []byte `json:"output"`
-	Name   string `json:"name"`
+	Input           []byte        `json:"input"`
+	Output          []byte        `json:"output"`
+	Name            string        `json:"name"`
+	MemoryLimitInMB int           `json:"memory_limit_mb,omitempty"`
+	TimeLimit       time.Duration `json:"time_limit_ms,omitempty"`
 }
 
 type TestResult struct {
-	Name  string `json:"name"`
-	Error string `json:"error,omitempty"`
+	Name    string        `json:"name"`
+	Error   string        `json:"error,omitempty"`
+	Details *resultOutput `json:"details,omitempty"`
 }
 
 var (
 	flagTests   = flag.String("tests-file", "", "Path to a JSON lines file containing test specifications.")
 	flagTestBin = flag.String("test-bin", "", "Path to the test binary to execute.")
 	flagTimeout = flag.Duration("timeout", 10*time.Second, "Per-test timeout. Use 0 for no timeout.")
+	flagRunProg = flag.String("runprog-bin", "", "Path to the runprog binary.")
 )
 
 func main() {
-	log.SetFlags(0)
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
+	log.SetOutput(os.Stderr)
 	flag.Parse()
 
 	testsPath := strings.TrimSpace(*flagTests)
@@ -43,6 +48,9 @@ func main() {
 	testBinary := strings.TrimSpace(*flagTestBin)
 	if testBinary == "" {
 		log.Fatalf("--test-bin is required")
+	}
+	if *flagRunProg == "" {
+		log.Fatalf("--runprog-bin is required")
 	}
 
 	testSpecs, err := loadTests(testsPath)
@@ -110,7 +118,70 @@ func loadTests(path string) ([]TestSpec, error) {
 	return specs, nil
 }
 
+// Status defines uoj/run_program constants
+type Status int
+
+// UOJ run_program constants
+const (
+	StatusNormal  Status = iota // 0
+	StatusInvalid               // 1
+	StatusRE                    // 2
+	StatusMLE                   // 3
+	StatusTLE                   // 4
+	StatusOLE                   // 5
+	StatusBan                   // 6
+	StatusFatal                 // 7
+)
+const RESULT_OUTPUT_FILE = "result.out"
+
+func statusToString(s Status) string {
+	switch s {
+	case StatusNormal:
+		return "Normal"
+	case StatusInvalid:
+		return "Invalid"
+	case StatusRE:
+		return "Runtime Error"
+	case StatusMLE:
+		return "Memory Limit Exceeded"
+	case StatusTLE:
+		return "Time Limit Exceeded"
+	case StatusOLE:
+		return "Output Limit Exceeded"
+	case StatusBan:
+		return "Disallowed Syscall"
+	case StatusFatal:
+		return "Fatal Error"
+	default:
+		return "Unknown"
+	}
+}
+
+type resultOutput struct {
+	TimeMs   int    `json:"time_ms"`
+	MemoryKB uint64 `json:"memory_kb"`
+	ExitCode int    `json:"exit_code"`
+	Status   string `json:"status"`
+}
+
+func parseResultOutput() (*resultOutput, error) {
+	file, err := os.Open(RESULT_OUTPUT_FILE)
+	if err != nil {
+		return nil, fmt.Errorf("open result file: %w", err)
+	}
+	defer file.Close()
+	var ro resultOutput
+	var status Status
+	_, err = fmt.Fscanf(file, "%d %d %d %d", &status, &ro.TimeMs, &ro.MemoryKB, &ro.ExitCode)
+	if err != nil {
+		return nil, fmt.Errorf("parse result file: %w", err)
+	}
+	ro.Status = statusToString(status)
+	return &ro, nil
+}
+
 func runSingleTest(binaryPath string, spec TestSpec, timeout time.Duration) TestResult {
+	log.Printf("Running test %s", spec.Name)
 	result := TestResult{Name: spec.Name}
 
 	ctx := context.Background()
@@ -120,18 +191,45 @@ func runSingleTest(binaryPath string, spec TestSpec, timeout time.Duration) Test
 		defer cancel()
 	}
 
-	cmd := exec.CommandContext(ctx, binaryPath)
+	if spec.MemoryLimitInMB == 0 {
+		spec.MemoryLimitInMB = 256
+	}
+	if spec.TimeLimit == 0 {
+		spec.TimeLimit = time.Second
+	}
+
+	cmd := exec.CommandContext(ctx, *flagRunProg,
+		"-ml", fmt.Sprintf("%d", spec.MemoryLimitInMB),
+		"-tl", spec.TimeLimit.String(),
+		"-res", RESULT_OUTPUT_FILE,
+		"-runner", "container",
+		"-unsafe",
+		"-cgroup",
+		"--bind-pwd",
+		binaryPath,
+	)
+	log.Printf("Executing command: %s", strings.Join(cmd.Args, " "))
 	cmd.Stdin = bytes.NewReader(spec.Input)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err != nil {
+		log.Printf("test %s execution error: %v", spec.Name, err)
+	}
 
-	if err := cmd.Run(); err != nil {
-		if errors.Is(err, context.DeadlineExceeded) || (ctx.Err() != nil && errors.Is(ctx.Err(), context.DeadlineExceeded)) {
-			result.Error = fmt.Sprintf("timeout after %s", timeout)
-			return result
-		}
+	if errors.Is(err, context.DeadlineExceeded) || (ctx.Err() != nil && errors.Is(ctx.Err(), context.DeadlineExceeded)) {
+		result.Error = fmt.Sprintf("timeout after %s", timeout)
+		return result
+	}
+	ro, poErr := parseResultOutput()
+	if poErr != nil {
+		log.Printf("warning: parse result output for test")
+	}
+	result.Details = ro
+
+	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
 			stderrMsg := strings.TrimSpace(stderr.String())

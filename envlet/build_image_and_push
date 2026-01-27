@@ -21,6 +21,12 @@ main() {
 	make clean
 	make linux -j
 
+	echo "Building go-sandbox binary"
+	cd 3rd/go-sandbox
+	GOOS=linux GOARCH=amd64 go build -o runprog ./cmd/runprog
+	mv runprog ../../bin
+	cd ../..
+
 	echo "Building ${IMAGE_REPO}:${tag}"
 	docker build -f Dockerfile -t "${IMAGE_REPO}:${tag}" .
 
