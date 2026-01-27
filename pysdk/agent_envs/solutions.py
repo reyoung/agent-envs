@@ -32,7 +32,7 @@ class OJResult:
             status = OJResultStatus.MLE
         elif details_status == "Runtime Error":
             status = OJResultStatus.RE
-        elif details_status == "Normal":
+        elif details_status in ("Normal", "Output Limit Exceeded"):
             status = OJResultStatus.WA
         else:
             raise RuntimeError(f"Unknown status in judge result: {details_status}")
