@@ -53,7 +53,7 @@ else
     echo "Compilation succeeded. Removing compile_errors.txt"
     rm -f compile_errors.txt
 fi
-""".format(" ".join(source_files)))
+""".format(" ".join(shlex.quote(f) for f in source_files)))
         
         os.chmod(f"{dirpath}/build.sh", 0o755)
 
@@ -150,7 +150,7 @@ else
     echo "Compilation succeeded. Removing compile_errors.txt"
     rm -f compile_errors.txt
 fi
-""".format(" ".join(source_files)))
+""".format(" ".join(shlex.quote(f) for f in source_files)))
         
         os.chmod(f"{dirpath}/build.sh", 0o755)
         output_file = f"{dirpath}/bin"
