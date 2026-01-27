@@ -62,7 +62,7 @@ spec:
   minReplicaCount: 0
   maxReplicaCount: 50
   pollingInterval: 5      # 每 5 秒检查一次队列长度
-  cooldownPeriod: 60      # 队列变空后 600 秒再缩容（防抖）
+  cooldownPeriod: 60      # 队列变空后 60 秒再缩容（防抖）
 
   triggers:
     - type: redis
