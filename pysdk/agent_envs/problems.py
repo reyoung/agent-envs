@@ -14,7 +14,7 @@ class FileContent:
     def from_json(cls, data: dict) -> typing.Self:
         return cls(
             filename=data["filename"],
-            content=base64.b64decode(data["content"]) if "content" in data else b"",
+            content=base64.b64decode(data["content"]),
         )
 
 
@@ -30,8 +30,8 @@ class OJTestCase:
     def from_json(cls, data: dict) -> typing.Self:
         return cls(
             name=data["name"],
-            input=base64.b64decode(data["input"]) if "input" in data else b"",
-            output=base64.b64decode(data["output"]) if "output" in data else b"",
+            input=base64.b64decode(data["input"]),
+            output=base64.b64decode(data["output"]),
             time_limit=data.get("time_limit"),
             memory_limit_in_mb=data.get("memory_limit_in_mb"),
         )
@@ -72,8 +72,8 @@ class RunProgram:
     @classmethod
     def from_json(cls, data: dict) -> typing.Self:
         return cls(
-            binary=base64.b64decode(data["binary"]) if "binary" in data else b"",
-            stdin=base64.b64decode(data["stdin"]) if "stdin" in data else b"",
+            binary=base64.b64decode(data["binary"]),
+            stdin=base64.b64decode(data["stdin"]),
             time_limit=data.get("time_limit"),
             memory_limit_in_mb=data.get("memory_limit_in_mb"),
             args=data.get("args"),
