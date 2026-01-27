@@ -8,7 +8,7 @@ import base64
 @dataclasses.dataclass(frozen=True)
 class FileContent:
     filename: str
-    content: bytes
+    content: bytes = b""
 
     @classmethod
     def from_json(cls, data: dict) -> typing.Self:
@@ -21,8 +21,8 @@ class FileContent:
 @dataclasses.dataclass(frozen=True)
 class OJTestCase:
     name: str
-    input: bytes
-    output: bytes
+    input: bytes = b""
+    output: bytes = b""
     time_limit: float | None = None
     memory_limit_in_mb: int | None = None
 
@@ -62,8 +62,8 @@ class CompileCPP:
     
 @dataclasses.dataclass(frozen=True)
 class RunProgram:
-    binary: bytes
-    stdin: bytes
+    binary: bytes = b""
+    stdin: bytes = b""
     time_limit: float | None = None
     memory_limit_in_mb: int | None = None
     args: list[str] | None = None
