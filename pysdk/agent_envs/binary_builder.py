@@ -1,5 +1,5 @@
 import functools
-from .problems import Problem, CppOJ, CompileCPP
+from .problems import Problem, CppOJ, CompileCPP, RunProgram
 import asyncio
 import contextlib
 import tempfile
@@ -173,6 +173,61 @@ fi
     
     return BuildBinaryResult(binary=binary_content,
                             capture_pattern=r"^workspace/(compile_errors\.txt|solution)$",
+                            args=[
+                                "--target",
+                                "workspace"
+                            ])
+
+@build_binary.register
+async def _(run_program: RunProgram) -> BuildBinaryResult:
+    with _temp_dir() as dirpath:
+        async with aiofiles.open(f"{dirpath}/bin", "wb") as f:
+            await f.write(run_program.binary)
+        
+        os.chmod(f"{dirpath}/bin", 0o755)
+
+        async with aiofiles.open(f"{dirpath}/main.sh", "w") as f:
+            await f.write(
+                f"""#!/bin/bash
+set -e
+cd $(dirname $0)
+cat > input_b64 <<EOF
+{base64.b64encode(run_program.stdin).decode("utf-8")}
+EOF
+
+base64 -d < input_b64 | /envlet/runprog \
+    -tl {run_program.time_limit if run_program.time_limit is not None else 1:.4f}s \
+    -ml {run_program.memory_limit_in_mb if run_program.memory_limit_in_mb is not None else 256}\
+    -res runprog.result \
+    -runner container \
+    -unsafe \
+    -cgroup \
+    -bind-pwd \
+    $PWD/bin { " ".join(map(lambda x: "'" + x + "'", run_program.args)) if run_program.args else "" } > program.stdout 2> program.stderr
+""")
+        os.chmod(f"{dirpath}/main.sh", 0o755)
+
+        output_file = f"{dirpath}/run_binary"
+        proc = await asyncio.create_subprocess_exec(
+            "makeself",
+            "--gzip",
+            dirpath,
+            output_file,
+            "Run Program",
+            "./main.sh",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            stderr_output = stderr.decode() if stderr else ""
+            raise RuntimeError(f"Failed to create self-extracting archive: {stderr_output}")
+        
+        async with aiofiles.open(output_file, "rb") as f:
+            binary_content = await f.read()
+
+    return BuildBinaryResult(binary=binary_content,
+                            capture_pattern=r"^workspace/(runprog\.result|program\.stdout|program\.stderr)$",
                             args=[
                                 "--target",
                                 "workspace"

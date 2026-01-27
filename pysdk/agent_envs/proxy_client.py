@@ -55,6 +55,9 @@ class ExecResult:
             stderr=base64.b64decode(data["stderr"]) if "stderr" in data else b"",
             files=files,
         )
+    
+    def file_dict(self) -> dict[str, bytes]:
+        return {f.filename: f.content for f in self.files}
 
 
 class ProxyClient:

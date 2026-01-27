@@ -59,11 +59,34 @@ class CompileCPP:
         return cls(
             files=[FileContent.from_json(f) for f in data.get("files", [])],
         )
+    
+@dataclasses.dataclass(frozen=True)
+class RunProgram:
+    binary: bytes
+    stdin: bytes
+    time_limit: float | None = None
+    memory_limit_in_mb: int | None = None
+    args: list[str] | None = None
+    type: typing.Literal["run_program"] = "run_program"
 
-Problem = typing.Union[CppOJ, CompileCPP]
+    @classmethod
+    def from_json(cls, data: dict) -> typing.Self:
+        return cls(
+            binary=base64.b64decode(data["binary"]) if "binary" in data else b"",
+            stdin=base64.b64decode(data["stdin"]) if "stdin" in data else b"",
+            time_limit=data.get("time_limit"),
+            memory_limit_in_mb=data.get("memory_limit_in_mb"),
+            args=data.get("args"),
+        )
+
+Problem = typing.Union[CppOJ, CompileCPP, RunProgram]
 def problem_from_json(data: dict) -> Problem:
     problem_type = data.get("type")
     if problem_type == "cpp_oj":
         return CppOJ.from_json(data)
+    elif problem_type == "compile_cpp":
+        return CompileCPP.from_json(data)
+    elif problem_type == "run_program":
+        return RunProgram.from_json(data)
     else:
         raise NotImplementedError(f"Unsupported problem type: {problem_type}")

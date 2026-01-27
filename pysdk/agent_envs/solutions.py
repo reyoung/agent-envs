@@ -66,4 +66,14 @@ class CompileSolution:
     binary: bytes | None = None
     type: typing.Literal["compile_cpp"] = "compile_cpp"
 
-Solution = typing.Union[CppOJSolution, CompileSolution]
+@dataclasses.dataclass(frozen=True)
+class RunProgramSolution:
+    exit_code: int
+    stdout: bytes
+    stderr: bytes
+    memory: int | None = None
+    time: float | None = None
+    status: int | None = None
+    type: typing.Literal["run_program"] = "run_program"
+
+Solution = typing.Union[CppOJSolution, CompileSolution, RunProgramSolution]
