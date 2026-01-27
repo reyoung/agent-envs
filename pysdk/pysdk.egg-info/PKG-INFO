@@ -1,9 +1,0 @@
-Metadata-Version: 2.4
-Name: pysdk
-Version: 0.1.0
-Summary: Add your description here
-Requires-Python: >=3.14
-Description-Content-Type: text/markdown
-Requires-Dist: aiofiles>=25.1.0
-Requires-Dist: httpx>=0.28.1
-Requires-Dist: pydantic>=2.12.5
