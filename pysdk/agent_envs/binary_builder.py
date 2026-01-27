@@ -59,7 +59,7 @@ fi
 
         async with aiofiles.open(f"{dirpath}/input_spec.jsonl", "w") as f:
             for test_case in cpp_oj.test_cases:
-                spec : dict[str, str | int] = {
+                spec: dict[str, str | int] = {
                     "name": test_case.name,
                     "input": base64.b64encode(test_case.input).decode("utf-8"),
                     "output": base64.b64encode(test_case.output).decode("utf-8"),
