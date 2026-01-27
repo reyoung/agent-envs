@@ -44,14 +44,14 @@ func (e *tempDirExecutor) Execute(ctx context.Context, spec *jobqueue.JobSpec) (
 		}
 		log.Printf("execution capture pattern %s", spec.CapturePattern)
 		if spec.CapturePattern != "" {
-			pattern, captureErr := regexp.Compile(spec.CapturePattern)
-			if captureErr != nil {
-				err = errors.Join(err, fmt.Errorf("compile capture pattern: %w", captureErr))
+			pattern, compileErr := regexp.Compile(spec.CapturePattern)
+			if compileErr != nil {
+				err = errors.Join(err, fmt.Errorf("capture outputs: compile capture pattern: %w", compileErr))
 				return
 			}
 
 			// Walk through the working directory to find matching files
-			captureErr = filepath.Walk(workdir, func(path string, info os.FileInfo, err error) error {
+			walkErr := filepath.Walk(workdir, func(path string, info os.FileInfo, err error) error {
 				if err != nil {
 					return err
 				}
@@ -75,8 +75,8 @@ func (e *tempDirExecutor) Execute(ctx context.Context, spec *jobqueue.JobSpec) (
 				}
 				return nil
 			})
-			if captureErr != nil {
-				err = errors.Join(err, fmt.Errorf("compile files error: %w", captureErr))
+			if walkErr != nil {
+				err = errors.Join(err, fmt.Errorf("capture outputs: walk files error: %w", walkErr))
 				return
 			}
 		}

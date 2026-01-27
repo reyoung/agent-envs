@@ -1,7 +1,7 @@
 import json
 from .proxy_client import ExecResult
 from .problems import Problem, CppOJ
-from .solutions import Solution, CppOJSolution, OJResult, OJResultStatus
+from .solutions import Solution, CppOJSolution, OJResult
 import functools
 
 

@@ -20,7 +20,7 @@ type TestSpec struct {
 	Output          []byte        `json:"output"`
 	Name            string        `json:"name"`
 	MemoryLimitInMB int           `json:"memory_limit_mb,omitempty"`
-	TimeLimit       time.Duration `json:"time_limit_ms,omitempty"`
+	TimeLimit       time.Duration `json:"time_limit,omitempty"`
 }
 
 type TestResult struct {

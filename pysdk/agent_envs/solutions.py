@@ -15,7 +15,7 @@ class OJResultStatus(enum.StrEnum):
 class OJResult:
     name: str
     error: str | None
-    type: OJResultStatus
+    status: OJResultStatus
 
     @classmethod
     def from_json(cls, data: dict) -> "OJResult":
@@ -23,17 +23,17 @@ class OJResult:
         details_status = details.get("status", "Fatal Error")
         error = data.get("error")
         if error is None:
-            type = OJResultStatus.AC
+            status = OJResultStatus.AC
         elif details_status in ("Fatal Error", "Disallowed Syscall", "Invalid", "Unknown"):
-            type = OJResultStatus.SE
+            status = OJResultStatus.SE
         elif details_status == "Time Limit Exceeded":
-            type = OJResultStatus.TLE
+            status = OJResultStatus.TLE
         elif details_status == "Memory Limit Exceeded":
-            type = OJResultStatus.MLE
+            status = OJResultStatus.MLE
         elif details_status == "Runtime Error":
-            type = OJResultStatus.RE
+            status = OJResultStatus.RE
         elif details_status == "Normal":
-            type = OJResultStatus.WA
+            status = OJResultStatus.WA
         else:
             raise RuntimeError(f"Unknown status in judge result: {details_status}")
         
@@ -41,7 +41,7 @@ class OJResult:
         return cls(
             name=data["name"],
             error=data.get("error"),
-            type=type,
+            status=status,
         )
 
 
@@ -56,8 +56,8 @@ class CppOJSolution:
         if self.compile_error is not None:
             return OJResultStatus.CE
         for result in self.results:
-            if result.type != OJResultStatus.AC:
-                return result.type
+            if result.status != OJResultStatus.AC:
+                return result.status
         return OJResultStatus.AC
 
 Solution = typing.Union[CppOJSolution]
