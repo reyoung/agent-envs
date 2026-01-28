@@ -10,12 +10,10 @@ from agent_envs.solutions import (
 )
 from concurrent.futures import ThreadPoolExecutor
 import json
-import base64
 import dataclasses
 import typing
 import math
 import enum
-import time
 
 
 @dataclasses.dataclass(frozen=True)
@@ -385,7 +383,7 @@ class IOIJudger:
         self._thread_pool = ThreadPoolExecutor(max_workers=num_threads)
 
     async def judge(self, line: str, solution: str | None = None) -> IOIJudgeResult:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         problem = await loop.run_in_executor(self._thread_pool, IOIProblem, line, solution)
 
         try:
@@ -418,7 +416,7 @@ class IOIJudger:
                 raise RuntimeError(f"Expected RunProgramSolution, got {type(result)}.")
             check_results[case_] = result
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             self._thread_pool,
             self._parse_judge_results,
@@ -450,7 +448,7 @@ class IOIJudger:
         return result
 
     async def _create_task(self, coro: asyncio._CoroutineLike[T]) -> asyncio.Task[T]:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         await self._concurrency.acquire()
         task = loop.create_task(coro)
         task.add_done_callback(lambda t: self._concurrency.release())
