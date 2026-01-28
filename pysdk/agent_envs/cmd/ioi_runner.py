@@ -2,7 +2,7 @@ import asyncio
 from agent_envs.proxy_client import ProxyClient
 from agent_envs.executor import Executor
 from agent_envs.problems import CompileCPP, RunProgram, FileContent
-from agent_envs.solutions import CompileSolution, RunProgramSolution, Solution
+from agent_envs.solutions import CompileSolution, RunProgramSolution, RunProgramStatus, Solution
 from concurrent.futures import ThreadPoolExecutor
 import json
 import base64
@@ -27,41 +27,68 @@ class Limit(typing.TypedDict):
 
 class RawSubTask(typing.TypedDict):
     name: str
-    score: int
+    score: float
     test_case_names: list[str]
     limit: Limit
 
 @dataclasses.dataclass(frozen=True)
 class ParsedSubTask:
     name: str
-    score: int
+    score: float
     cases: list[SubTaskCase]
 
 class RunProgramWithoutBinary:
     def __init__(self,
-                 stdin: bytes,
+                 input: str,
+                 output: str,
                  time_limit: float | None = None,
-                 memory_limit_in_mb: int | None = None,
-                 args: list[str] | None = None) -> None:
-        self.stdin = stdin
+                 memory_limit_in_mb: int | None = None) -> None:
         self.time_limit = time_limit
         self.memory_limit_in_mb = memory_limit_in_mb
-        self.args = args
+        self.input = input
+        self.output = output
         self.type: typing.Literal["run_program"] = "run_program"
     
-    def build(self, binary: bytes) -> RunProgram:
-        return RunProgram(
-            binary=binary,
-            stdin=self.stdin,
-            time_limit=self.time_limit,
-            memory_limit_in_mb=self.memory_limit_in_mb,
-            args=self.args,
-        )
+    def build(self, files: dict[CommandType, bytes], problem_id: str, year: int) -> RunProgram:
+        if CommandType.SOLUTION in files and CommandType.CHECKER in files and CommandType.MANAGER not in files:
+            return RunProgram(
+                entrypoint="main.sh",
+                files=[
+                    FileContent(
+                        filename=CommandType.SOLUTION.value,
+                        content=files[CommandType.SOLUTION],
+                    ),
+                    FileContent(
+                        filename=CommandType.CHECKER.value,
+                        content=files[CommandType.CHECKER],
+                    ),
+                    FileContent(
+                        filename="input.txt",
+                        content=self.input.encode("utf-8"),
+                    ),
+                    FileContent(
+                        filename="output.txt",
+                        content=self.output.encode("utf-8"),
+                    ),
+                    FileContent(
+                        filename="main.sh",
+                        content=f"""#!/bin/bash
+set -e
+cd $(dirname $0)
+./{CommandType.SOLUTION.value} < input.txt | ./{CommandType.CHECKER.value} input.txt /dev/stdin output.txt
+""".encode("utf-8"),
+                    )
+                ],
+                time_limit=self.time_limit,
+                memory_limit_in_mb=self.memory_limit_in_mb,
+            )
+        else:
+            raise NotImplementedError("Unsupported combination of solution/checker/manager binaries.")
+
 
 @dataclasses.dataclass(frozen=False)
 class RunTaskCase:
     problem: RunProgramWithoutBinary
-    stdout: str
     solution: RunProgramSolution | None = None
 
 @dataclasses.dataclass(frozen=True)
@@ -82,12 +109,11 @@ def _build_sub_task(built_test_cases: dict[SubTaskCase, RunTaskCase],
         if case_ not in built_test_cases:
             built_test_cases[case_] = RunTaskCase(
                 problem=RunProgramWithoutBinary(
-                    stdin=base64.b64encode(test_cases[test_case_name]["input"].encode("utf-8")),
+                    input=test_cases[test_case_name]["input"],
+                    output=test_cases[test_case_name]["output"],
                     time_limit=case_.time_limit,
-                    memory_limit_in_mb=int(math.ceil( case_.memory_limit / 1024 / 1024)),
-                    args=[],
+                    memory_limit_in_mb=int(math.ceil(case_.memory_limit / 1024 / 1024)),
                 ),
-                stdout=test_cases[test_case_name]["output"],
             )
         cases.append(case_)
     
@@ -173,50 +199,133 @@ def _build_checker_compile_commands(files: dict[str, str]) -> typing.Generator[t
             ] + headers,
         ))
 
+class ScoreDetail(typing.NamedTuple):
+    task_score: float
+    test_score: float
+    n_cases: int
 
+
+    @property
+    def score(self) -> float:
+        return (self.test_score / self.n_cases) * self.task_score
 
 class IOIProblem:
     def __init__(self, json_payload: str, solution: str | None = None) -> None:
         js = json.loads(json_payload)
         sources: dict[str, str] = js["metadata"]["grader_files"]
+        self._id = js["metadata"]["id"]
+        self._year = js["metadata"]["year"]
         if solution is None:
             solution = js["metadata"]["sample_solution"]
             assert solution is not None, "Solution code must be provided either in the JSON payload or as an argument."
         
         sources["solution.cpp"] = solution
 
-        # self._solution_compile_command = _build_solution_compile_commands(sources)
         self._compile_commands = dict(_build_checker_compile_commands(sources))
         self._compile_commands[CommandType.SOLUTION] = _build_solution_compile_commands(sources)
 
         test_cases = js["metadata"]["test_cases"]
         sub_tasks = js["metadata"]["sub_tasks"]
-        self._check_taks = _build_sub_task_case(test_cases, sub_tasks)
+        self._check_tasks = _build_sub_task_case(test_cases, sub_tasks)
+    
+    @property
+    def problem_id(self) -> str:
+        return self._id
+    
+    @property
+    def year(self) -> int:
+        return self._year
 
     def compile_command(self) -> dict[CommandType, CompileCPP]:
         return self._compile_commands
-
-
-
-    def test_cases(self, binary: bytes) -> typing.Generator[tuple[SubTaskCase, RunProgram], None, None]:
-        for case_, run_task_case in self._check_taks.test_cases.items():
-            program = run_task_case.problem.build(binary)
-            yield case_, program
     
-    def score(self, solutions: typing.Generator[tuple[SubTaskCase, RunProgramSolution], None, None]) -> int:
-        pass
-
-
-@dataclasses.dataclass
-class IOIJudgeResult:
-    score: float
-    reasons: list[str] = dataclasses.field(default_factory=list)
-
-T = typing.TypeVar("T")
+    def check_tasks(self) -> OJCheckTasks:
+        return self._check_tasks
+    
+    def score(self, results: dict[SubTaskCase, JudgeResult]) -> dict[str, ScoreDetail]:
+        return {sub_task.name: ScoreDetail(sub_task.score, sum(results[c].get_score() for c in sub_task.cases), len(sub_task.cases)) for sub_task in self._check_tasks.sub_tasks }
 
 class CompileError(RuntimeError):
     pass
 
+@dataclasses.dataclass(frozen=True)
+class SystemError:
+    stdout: str
+    stderr: str
+    exit_code: int
+
+    def get_score(self) -> float:
+        return 0.0
+
+class TimeLimitExceeded:
+    
+    def get_score(self) -> float:
+        return 0.0
+
+class MemoryLimitExceeded:
+    
+    def get_score(self) -> float:
+        return 0.0
+    
+
+@dataclasses.dataclass(frozen=True)
+class JudgedScore:
+    score: float
+    detail: str
+    time: float
+    memory_in_mb: float
+
+    def get_score(self) -> float:
+        return self.score
+
+@dataclasses.dataclass(frozen=True)
+class UnknownResult:
+    solution: RunProgramSolution
+
+    def get_score(self) -> float:
+        return 0.0
+
+JudgeResult = TimeLimitExceeded | SystemError | MemoryLimitExceeded | JudgedScore | UnknownResult
+
+Reason = dict[SubTaskCase, JudgeResult] | str
+
+@dataclasses.dataclass
+class IOIJudgeResult:
+    scores: dict[str, ScoreDetail]
+    reason: Reason
+
+    @property
+    def score(self) -> float:
+        return sum(score_detail.score for score_detail in self.scores.values())
+
+def _parse_result(result: RunProgramSolution) -> JudgeResult:
+    if result.status is None:
+        return SystemError(
+            stdout=result.stdout.decode("utf-8"),
+            stderr=result.stderr.decode("utf-8"),
+            exit_code=result.exit_code,
+        )
+    
+    if result.status == RunProgramStatus.TIME_LIMIT_EXCEEDED:
+        return TimeLimitExceeded()
+    
+    if result.status == RunProgramStatus.MEMORY_LIMIT_EXCEEDED:
+        return MemoryLimitExceeded()
+    
+    if result.status == RunProgramStatus.NORMAL:
+        score = float(result.stdout.decode("utf-8").strip())
+        detail = result.stderr.decode("utf-8").strip()
+        return JudgedScore(
+            score=score,
+            detail=detail,
+            time=result.time if result.time is not None else 0.0,
+            memory_in_mb=float(result.memory) / 1024 if result.memory is not None else 0.0,
+        )
+    
+    return UnknownResult(solution=result)
+
+
+T = typing.TypeVar("T")
 
 class IOIJudger:
     def __init__(self, 
@@ -233,19 +342,57 @@ class IOIJudger:
     async def judge(self, line: str, solution: str | None = None) -> IOIJudgeResult:
         loop = asyncio.get_event_loop()
         problem = await loop.run_in_executor(self._thread_pool, IOIProblem, line, solution)
+        try:
+            binaries = await self._compile_problem(problem)
+        except CompileError as e:
+            return IOIJudgeResult(
+                scores={},
+                reason=str(e),
+            )
 
-        binaries = await self._compile_problem(problem)
+        check_results = await self._judge(problem, binaries)
         
-        raise NotImplementedError()
+        scores = await loop.run_in_executor(self._thread_pool, problem.score, check_results)
+        return IOIJudgeResult(
+            scores=scores,
+            reason=check_results,
+        )
     
-    async def _compile_problem(self, problem: IOIProblem) -> dict[str, bytes]:
+    async def _judge(self, problem: IOIProblem, binaries: dict[CommandType, bytes]) -> dict[SubTaskCase, JudgeResult]:
+        check_tasks = problem.check_tasks()
+        check_task_futures: dict[SubTaskCase, asyncio.Task[Solution]] = {}
+        for case_, run_task_case in check_tasks.test_cases.items():
+            run_program = run_task_case.problem.build(binaries, problem.problem_id, problem.year)
+            solution_task = await self._create_task(
+                self._executor.execute(problem=run_program)
+            )
+            check_task_futures[case_] = solution_task
+        
+        check_results: dict[SubTaskCase, RunProgramSolution] = {}
+        for case_, task in check_task_futures.items():
+            result = await task
+            if not isinstance(result, RunProgramSolution):
+                raise RuntimeError(f"Expected RunProgramSolution, got {type(result)}.")
+            check_results[case_] = result
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            self._thread_pool, 
+            self._parse_judge_results,
+            check_results,
+        )
+    
+    def _parse_judge_results(self, check_results: dict[SubTaskCase, RunProgramSolution]) -> dict[SubTaskCase, JudgeResult]:
+        return {k: _parse_result(v) for k, v in check_results.items()}
+    
+    async def _compile_problem(self, problem: IOIProblem) -> dict[CommandType, bytes]:
         commands = problem.compile_command()
-        compile_result_tasks: dict[str, asyncio.Task[Solution]] = {
+        compile_result_tasks: dict[CommandType, asyncio.Task[Solution]] = {
             k: await self._create_task(
                 self._executor.execute(problem=cmd)
             ) for k, cmd in commands.items()
         }
-        result: dict[str, bytes] = {}
+        result: dict[CommandType, bytes] = {}
         for k, task in compile_result_tasks.items():
             task = await task
             if not isinstance(task, CompileSolution):
@@ -266,8 +413,6 @@ class IOIJudger:
         task.add_done_callback(lambda t: self._concurrency.release())
         return task
 
-
-    
     async def close(self):
         await self._proxy_client.close()
         self._thread_pool.shutdown(wait=True)

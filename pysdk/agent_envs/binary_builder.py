@@ -183,21 +183,20 @@ fi
 @build_binary.register
 async def _(run_program: RunProgram) -> BuildBinaryResult:
     with _temp_dir() as dirpath:
-        async with aiofiles.open(f"{dirpath}/bin", "wb") as f:
-            await f.write(run_program.binary)
-        
-        os.chmod(f"{dirpath}/bin", 0o755)
+        for file in run_program.files:
+            async with aiofiles.open(f"{dirpath}/{file.filename}", "wb") as f:
+                await f.write(file.content)
+            
+            os.chmod(f"{dirpath}/{file.filename}", 0o755)
 
-        async with aiofiles.open(f"{dirpath}/main.sh", "w") as f:
+        async with aiofiles.open(f"{dirpath}/run", "w") as f:
             await f.write(
                 f"""#!/bin/bash
 set -e
 cd $(dirname $0)
-cat > input_b64 <<EOF
-{base64.b64encode(run_program.stdin).decode("utf-8")}
-EOF
-
-base64 -d < input_b64 | /envlet/runprog \
+ls -lha .
+echo "Running program: {shlex.quote(run_program.entrypoint)}"
+/envlet/runprog \
     -tl {run_program.time_limit if run_program.time_limit is not None else 1:.4f}s \
     -ml {run_program.memory_limit_in_mb if run_program.memory_limit_in_mb is not None else 256}\
     -res runprog.result \
@@ -205,9 +204,9 @@ base64 -d < input_b64 | /envlet/runprog \
     -unsafe \
     -cgroup \
     -bind-pwd \
-    $PWD/bin { " ".join(map(shlex.quote, run_program.args)) if run_program.args else "" } > program.stdout 2> program.stderr
+    $PWD/{shlex.quote(run_program.entrypoint)} 1> program.stdout 2> program.stderr
 """)
-        os.chmod(f"{dirpath}/main.sh", 0o755)
+        os.chmod(f"{dirpath}/run", 0o755)
 
         output_file = f"{dirpath}/run_binary"
         proc = await asyncio.create_subprocess_exec(
@@ -216,7 +215,7 @@ base64 -d < input_b64 | /envlet/runprog \
             dirpath,
             output_file,
             "Run Program",
-            "./main.sh",
+            "./run",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )

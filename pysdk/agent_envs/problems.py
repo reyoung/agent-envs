@@ -62,8 +62,8 @@ class CompileCPP:
     
 @dataclasses.dataclass(frozen=True)
 class RunProgram:
-    binary: bytes
-    stdin: bytes
+    entrypoint: str
+    files: list[FileContent]
     time_limit: float | None = None
     memory_limit_in_mb: int | None = None
     args: list[str] | None = None
@@ -72,8 +72,8 @@ class RunProgram:
     @classmethod
     def from_json(cls, data: dict) -> typing.Self:
         return cls(
-            binary=base64.b64decode(data["binary"]),
-            stdin=base64.b64decode(data["stdin"]),
+            entrypoint=data["entrypoint"],
+            files=[FileContent.from_json(f) for f in data.get("files", [])],
             time_limit=data.get("time_limit"),
             memory_limit_in_mb=data.get("memory_limit_in_mb"),
             args=data.get("args"),
