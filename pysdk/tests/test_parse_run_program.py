@@ -17,9 +17,7 @@ async def test_run_program_result_parsing():
             FileContent(filename="workspace/runprog.result", content=b"0 1 532 0\n"),
         ],
     )
-    r = await parse_result(
-        RunProgram(binary=b"\x7fELF...\x00", stdin=b"3 4\n"), exec_result
-    )
+    r = await parse_result(RunProgram(binary=b"\x7fELF...\x00", stdin=b"3 4\n"), exec_result)
     assert isinstance(r, RunProgramSolution)
     assert r.exit_code == 0
     assert r.stdout == b"7\n"
@@ -71,9 +69,7 @@ async def test_run_program_malformed_result_raises():
         stdout=b"",
         stderr=b"",
         files=[
-            FileContent(
-                filename="workspace/runprog.result", content=b"invalid content"
-            ),
+            FileContent(filename="workspace/runprog.result", content=b"invalid content"),
         ],
     )
     with pytest.raises(RuntimeError):

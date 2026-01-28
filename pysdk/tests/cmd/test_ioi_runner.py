@@ -3,9 +3,7 @@ import os
 
 
 def test_ioi_parser():
-    with open(
-        os.path.join(os.path.dirname(__file__), "test_ioi_runner.json"), "r"
-    ) as f:
+    with open(os.path.join(os.path.dirname(__file__), "test_ioi_runner.json"), "r") as f:
         json_payload = f.read()
 
     problem = IOIProblem(json_payload)

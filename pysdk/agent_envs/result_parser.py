@@ -102,9 +102,7 @@ def _parse_runprog_result(content: bytes) -> tuple[RunProgramStatus, int, int, i
         raise RuntimeError("runprog.result is not valid utf-8") from e
 
     if len(parts) != 4:
-        raise RuntimeError(
-            f"runprog.result malformed: expected 4 space-separated integers, got {len(parts)}"
-        )
+        raise RuntimeError(f"runprog.result malformed: expected 4 space-separated integers, got {len(parts)}")
 
     try:
         status_code, time_ms, memory_kb, exit_code = map(int, parts)

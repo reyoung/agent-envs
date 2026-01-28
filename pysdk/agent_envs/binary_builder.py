@@ -123,9 +123,7 @@ cat judge_result.jsonl
         _, stderr = await proc.communicate()
         if proc.returncode != 0:
             stderr_output = stderr.decode() if stderr else ""
-            raise RuntimeError(
-                f"Failed to create self-extracting archive: {stderr_output}"
-            )
+            raise RuntimeError(f"Failed to create self-extracting archive: {stderr_output}")
         async with aiofiles.open(output_file, "rb") as f:
             binary_content = await f.read()
         return BuildBinaryResult(
@@ -174,9 +172,7 @@ fi
         _, stderr = await proc.communicate()
         if proc.returncode != 0:
             stderr_output = stderr.decode() if stderr else ""
-            raise RuntimeError(
-                f"Failed to create self-extracting archive: {stderr_output}"
-            )
+            raise RuntimeError(f"Failed to create self-extracting archive: {stderr_output}")
 
         async with aiofiles.open(output_file, "rb") as f:
             binary_content = await f.read()
@@ -231,9 +227,7 @@ echo "Running program: {shlex.quote(run_program.entrypoint)}"
         _, stderr = await proc.communicate()
         if proc.returncode != 0:
             stderr_output = stderr.decode() if stderr else ""
-            raise RuntimeError(
-                f"Failed to create self-extracting archive: {stderr_output}"
-            )
+            raise RuntimeError(f"Failed to create self-extracting archive: {stderr_output}")
 
         async with aiofiles.open(output_file, "rb") as f:
             binary_content = await f.read()

@@ -62,14 +62,8 @@ class RunProgramWithoutBinary:
         self.output = output
         self.type: typing.Literal["run_program"] = "run_program"
 
-    def build(
-        self, files: dict[CommandType, bytes], problem_id: str, year: int
-    ) -> RunProgram:
-        if (
-            CommandType.SOLUTION in files
-            and CommandType.CHECKER in files
-            and CommandType.MANAGER not in files
-        ):
+    def build(self, files: dict[CommandType, bytes], problem_id: str, year: int) -> RunProgram:
+        if CommandType.SOLUTION in files and CommandType.CHECKER in files and CommandType.MANAGER not in files:
             return RunProgram(
                 entrypoint="main.sh",
                 files=[
@@ -102,9 +96,7 @@ cd $(dirname $0)
                 memory_limit_in_mb=self.memory_limit_in_mb,
             )
         else:
-            raise NotImplementedError(
-                "Unsupported combination of solution/checker/manager binaries."
-            )
+            raise NotImplementedError("Unsupported combination of solution/checker/manager binaries.")
 
 
 @dataclasses.dataclass(frozen=False)
@@ -149,15 +141,10 @@ def _build_sub_task(
     )
 
 
-def _build_sub_task_case(
-    test_cases: dict[str, TestCase], sub_tasks: list[RawSubTask]
-) -> OJCheckTasks:
+def _build_sub_task_case(test_cases: dict[str, TestCase], sub_tasks: list[RawSubTask]) -> OJCheckTasks:
     built_test_cases: dict[SubTaskCase, RunTaskCase] = {}
 
-    parsed_sub_tasks = [
-        _build_sub_task(built_test_cases, test_cases, sub_task)
-        for sub_task in sub_tasks
-    ]
+    parsed_sub_tasks = [_build_sub_task(built_test_cases, test_cases, sub_task) for sub_task in sub_tasks]
 
     return OJCheckTasks(
         test_cases=built_test_cases,
@@ -263,16 +250,12 @@ class IOIProblem:
         self._year = js["metadata"]["year"]
         if solution is None:
             solution = js["metadata"]["sample_solution"]
-            assert solution is not None, (
-                "Solution code must be provided either in the JSON payload or as an argument."
-            )
+            assert solution is not None, "Solution code must be provided either in the JSON payload or as an argument."
 
         sources["solution.cpp"] = solution
 
         self._compile_commands = dict(_build_checker_compile_commands(sources))
-        self._compile_commands[CommandType.SOLUTION] = _build_solution_compile_commands(
-            sources
-        )
+        self._compile_commands[CommandType.SOLUTION] = _build_solution_compile_commands(sources)
 
         test_cases = js["metadata"]["test_cases"]
         sub_tasks = js["metadata"]["sub_tasks"]
@@ -346,9 +329,7 @@ class UnknownResult:
         return 0.0
 
 
-JudgeResult = (
-    TimeLimitExceeded | SystemError | MemoryLimitExceeded | JudgedScore | UnknownResult
-)
+JudgeResult = TimeLimitExceeded | SystemError | MemoryLimitExceeded | JudgedScore | UnknownResult
 
 Reason = dict[SubTaskCase, JudgeResult] | str
 
@@ -384,9 +365,7 @@ def _parse_result(result: RunProgramSolution) -> JudgeResult:
             score=score,
             detail=detail,
             time=result.time if result.time is not None else 0.0,
-            memory_in_mb=float(result.memory) / 1024
-            if result.memory is not None
-            else 0.0,
+            memory_in_mb=float(result.memory) / 1024 if result.memory is not None else 0.0,
         )
 
     return UnknownResult(solution=result)
@@ -406,9 +385,7 @@ class IOIJudger:
 
     async def judge(self, line: str, solution: str | None = None) -> IOIJudgeResult:
         loop = asyncio.get_event_loop()
-        problem = await loop.run_in_executor(
-            self._thread_pool, IOIProblem, line, solution
-        )
+        problem = await loop.run_in_executor(self._thread_pool, IOIProblem, line, solution)
         try:
             binaries = await self._compile_problem(problem)
         except CompileError as e:
@@ -419,26 +396,18 @@ class IOIJudger:
 
         check_results = await self._judge(problem, binaries)
 
-        scores = await loop.run_in_executor(
-            self._thread_pool, problem.score, check_results
-        )
+        scores = await loop.run_in_executor(self._thread_pool, problem.score, check_results)
         return IOIJudgeResult(
             scores=scores,
             reason=check_results,
         )
 
-    async def _judge(
-        self, problem: IOIProblem, binaries: dict[CommandType, bytes]
-    ) -> dict[SubTaskCase, JudgeResult]:
+    async def _judge(self, problem: IOIProblem, binaries: dict[CommandType, bytes]) -> dict[SubTaskCase, JudgeResult]:
         check_tasks = problem.check_tasks()
         check_task_futures: dict[SubTaskCase, asyncio.Task[Solution]] = {}
         for case_, run_task_case in check_tasks.test_cases.items():
-            run_program = run_task_case.problem.build(
-                binaries, problem.problem_id, problem.year
-            )
-            solution_task = await self._create_task(
-                self._executor.execute(problem=run_program)
-            )
+            run_program = run_task_case.problem.build(binaries, problem.problem_id, problem.year)
+            solution_task = await self._create_task(self._executor.execute(problem=run_program))
             check_task_futures[case_] = solution_task
 
         check_results: dict[SubTaskCase, RunProgramSolution] = {}
@@ -463,16 +432,13 @@ class IOIJudger:
     async def _compile_problem(self, problem: IOIProblem) -> dict[CommandType, bytes]:
         commands = problem.compile_command()
         compile_result_tasks: dict[CommandType, asyncio.Task[Solution]] = {
-            k: await self._create_task(self._executor.execute(problem=cmd))
-            for k, cmd in commands.items()
+            k: await self._create_task(self._executor.execute(problem=cmd)) for k, cmd in commands.items()
         }
         result: dict[CommandType, bytes] = {}
         for k, task in compile_result_tasks.items():
             task = await task
             if not isinstance(task, CompileSolution):
-                raise RuntimeError(
-                    f"Expected CompileSolution, got {type(task)} for {k}."
-                )
+                raise RuntimeError(f"Expected CompileSolution, got {type(task)} for {k}.")
 
             if task.compile_error is not None:
                 raise CompileError(f"Compilation error in {k}:\n{task.compile_error}")
