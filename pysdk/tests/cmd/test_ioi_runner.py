@@ -8,7 +8,7 @@ def test_ioi_parser():
     
     problem = IOIProblem(json_payload)
     cmd = problem.compile_command()
-    assert len(cmd.files) > 0
+    assert len(cmd) > 0
 
     cases = list(problem.test_cases(b""))
     assert len(cases) > 0 

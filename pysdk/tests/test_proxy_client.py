@@ -12,7 +12,6 @@ echo "OK"
         ))
     finally:
         await cli.close()
-    print(resp)
     assert resp.exit_code == 0
     assert resp.stdout.strip() == b"OK"
     assert resp.stderr.strip() == b""
