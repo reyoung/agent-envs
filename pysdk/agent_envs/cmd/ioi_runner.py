@@ -15,6 +15,7 @@ import dataclasses
 import typing
 import math
 import enum
+import time
 
 
 @dataclasses.dataclass(frozen=True)
@@ -386,6 +387,7 @@ class IOIJudger:
     async def judge(self, line: str, solution: str | None = None) -> IOIJudgeResult:
         loop = asyncio.get_event_loop()
         problem = await loop.run_in_executor(self._thread_pool, IOIProblem, line, solution)
+
         try:
             binaries = await self._compile_problem(problem)
         except CompileError as e:
@@ -393,7 +395,6 @@ class IOIJudger:
                 scores={},
                 reason=str(e),
             )
-
         check_results = await self._judge(problem, binaries)
 
         scores = await loop.run_in_executor(self._thread_pool, problem.score, check_results)

@@ -10,5 +10,5 @@ def test_ioi_parser():
     cmd = problem.compile_command()
     assert len(cmd) > 0
 
-    cases = list(problem.test_cases(b""))
-    assert len(cases) > 0
+    cases = problem.check_tasks()
+    assert len(cases.test_cases) > 0

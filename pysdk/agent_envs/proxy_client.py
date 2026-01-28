@@ -68,15 +68,11 @@ class ProxyClient:
 
     async def execute(self, request: ExecRequest) -> ExecResult:
         resp = await self._http_client.post(url=self._url, json=request.as_json())
-        try:
-            resp.raise_for_status()
-            req = await resp.aread()
-            req_json = json.loads(req)
-            if "error" in req_json:
-                raise RuntimeError(f"Proxy server error: {req_json['error']}")
-            return ExecResult.from_json(req_json["result"])
-        finally:
-            await resp.aclose()
+        resp.raise_for_status()
+        resp_json = resp.json()
+        if "error" in resp_json:
+            raise RuntimeError(f"Proxy server error: {resp_json['error']}")
+        return ExecResult.from_json(resp_json["result"])
 
     async def close(self):
         await self._http_client.aclose()
