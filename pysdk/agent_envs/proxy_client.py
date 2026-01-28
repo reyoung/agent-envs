@@ -3,6 +3,7 @@ import httpx
 import dataclasses
 import base64
 
+
 @dataclasses.dataclass(frozen=True)
 class ExecRequest:
     queue_name: str
@@ -18,8 +19,8 @@ class ExecRequest:
         if self.capture_pattern is not None:
             res["capture_pattern"] = self.capture_pattern
         if self.args is not None:
-            res["args"] = self.args # type: ignore
-            
+            res["args"] = self.args  # type: ignore
+
         return res
 
 
@@ -55,7 +56,7 @@ class ExecResult:
             stderr=base64.b64decode(data["stderr"]) if "stderr" in data else b"",
             files=files,
         )
-    
+
     def file_dict(self) -> dict[str, bytes]:
         return {f.filename: f.content for f in self.files}
 
@@ -63,10 +64,7 @@ class ExecResult:
 class ProxyClient:
     def __init__(self, url: str):
         self._url = url
-        self._http_client = httpx.AsyncClient(
-            timeout=httpx.Timeout(60.0, read=1800.0)
-        )
-    
+        self._http_client = httpx.AsyncClient(timeout=httpx.Timeout(60.0, read=1800.0))
 
     async def execute(self, request: ExecRequest) -> ExecResult:
         resp = await self._http_client.post(url=self._url, json=request.as_json())
@@ -79,6 +77,6 @@ class ProxyClient:
             return ExecResult.from_json(req_json["result"])
         finally:
             await resp.aclose()
-    
+
     async def close(self):
         await self._http_client.aclose()

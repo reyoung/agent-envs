@@ -3,12 +3,14 @@ from agent_envs.executor import Executor
 from agent_envs.problems import CppOJ, FileContent, OJTestCase
 from agent_envs.solutions import OJResultStatus
 
+
 async def test_proxy_client_initialization():
     cli = ProxyClient(url="http://localhost:8080/execute")
 
     exec = Executor(cli)
     exec.register_queue("cpp_oj", "gcc_jobs")
-    resp = await exec.execute(problem=CppOJ(
+    resp = await exec.execute(
+        problem=CppOJ(
             files=[
                 FileContent(
                     filename="main.cpp",
@@ -34,6 +36,7 @@ int main() {
                     output=b"30\n",
                 ),
             ],
-        ))
-    
+        )
+    )
+
     assert resp.status == OJResultStatus.AC, f"Expected AC but got {resp.results}"

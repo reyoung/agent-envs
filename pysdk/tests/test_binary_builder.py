@@ -1,8 +1,8 @@
 from agent_envs.binary_builder import build_binary
 from agent_envs.problems import CppOJ, CompileCPP, FileContent, OJTestCase, RunProgram
 
-async def test_cpp_binary_builder():
 
+async def test_cpp_binary_builder():
     bin = await build_binary(
         CppOJ(
             files=[
@@ -54,4 +54,3 @@ int main() {
     assert len(bin.binary) > 0
     assert bin.capture_pattern == r"^workspace/(compile_errors\.txt|solution)$"
     assert bin.args == ["--target", "workspace"]
-
