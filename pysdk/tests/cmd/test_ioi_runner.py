@@ -1,0 +1,14 @@
+from agent_envs.cmd.ioi_runner import IOIProblem
+import os
+
+
+def test_ioi_parser():
+    with open(os.path.join(os.path.dirname(__file__), "test_ioi_runner.json"), "r") as f:
+        json_payload = f.read()
+
+    problem = IOIProblem(json_payload)
+    cmd = problem.compile_command()
+    assert len(cmd) > 0
+
+    cases = problem.check_tasks()
+    assert len(cases.test_cases) > 0

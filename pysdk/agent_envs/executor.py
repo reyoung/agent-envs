@@ -6,14 +6,15 @@ from .result_parser import parse_result
 
 __all__ = ["Executor"]
 
+
 class Executor:
     def __init__(self, proxy_client: ProxyClient) -> None:
         self._queue_names: dict[str, str] = {}
         self._proxy_client = proxy_client
-    
+
     def register_queue(self, problem_type: str, queue_name: str):
         self._queue_names[problem_type] = queue_name
-    
+
     async def execute(self, problem: Problem) -> Solution:
         binary = await build_binary(problem)
         queue_name = self._queue_names[problem.type]

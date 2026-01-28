@@ -36,6 +36,7 @@ class OJTestCase:
             memory_limit_in_mb=data.get("memory_limit_in_mb"),
         )
 
+
 @dataclasses.dataclass(frozen=True)
 class CppOJ:
     files: list[FileContent]
@@ -49,6 +50,7 @@ class CppOJ:
             test_cases=[OJTestCase.from_json(tc) for tc in data.get("test_cases", [])],
         )
 
+
 @dataclasses.dataclass(frozen=True)
 class CompileCPP:
     files: list[FileContent]
@@ -59,11 +61,12 @@ class CompileCPP:
         return cls(
             files=[FileContent.from_json(f) for f in data.get("files", [])],
         )
-    
+
+
 @dataclasses.dataclass(frozen=True)
 class RunProgram:
-    binary: bytes
-    stdin: bytes
+    entrypoint: str
+    files: list[FileContent]
     time_limit: float | None = None
     memory_limit_in_mb: int | None = None
     args: list[str] | None = None
@@ -72,14 +75,17 @@ class RunProgram:
     @classmethod
     def from_json(cls, data: dict) -> typing.Self:
         return cls(
-            binary=base64.b64decode(data["binary"]),
-            stdin=base64.b64decode(data["stdin"]),
+            entrypoint=data["entrypoint"],
+            files=[FileContent.from_json(f) for f in data.get("files", [])],
             time_limit=data.get("time_limit"),
             memory_limit_in_mb=data.get("memory_limit_in_mb"),
             args=data.get("args"),
         )
 
+
 Problem = typing.Union[CppOJ, CompileCPP, RunProgram]
+
+
 def problem_from_json(data: dict) -> Problem:
     problem_type = data.get("type")
     if problem_type == "cpp_oj":

@@ -2,6 +2,7 @@ import dataclasses
 import typing
 import enum
 
+
 class OJResultStatus(enum.StrEnum):
     AC = "Accepted"
     WA = "Wrong Answer"
@@ -10,6 +11,7 @@ class OJResultStatus(enum.StrEnum):
     RE = "Runtime Error"
     CE = "Compilation Error"
     SE = "System Error"
+
 
 @dataclasses.dataclass(frozen=True)
 class OJResult:
@@ -24,7 +26,12 @@ class OJResult:
         error = data.get("error")
         if error is None:
             status = OJResultStatus.AC
-        elif details_status in ("Fatal Error", "Disallowed Syscall", "Invalid", "Unknown"):
+        elif details_status in (
+            "Fatal Error",
+            "Disallowed Syscall",
+            "Invalid",
+            "Unknown",
+        ):
             status = OJResultStatus.SE
         elif details_status == "Time Limit Exceeded":
             status = OJResultStatus.TLE
@@ -36,7 +43,6 @@ class OJResult:
             status = OJResultStatus.WA
         else:
             raise RuntimeError(f"Unknown status in judge result: {details_status}")
-        
 
         return cls(
             name=data["name"],
@@ -71,12 +77,14 @@ class CppOJSolution:
             if result.status != OJResultStatus.AC:
                 return result.status
         return OJResultStatus.AC
-    
+
+
 @dataclasses.dataclass(frozen=True)
 class CompileSolution:
     compile_error: str | None = None
     binary: bytes | None = None
     type: typing.Literal["compile_cpp"] = "compile_cpp"
+
 
 @dataclasses.dataclass(frozen=True)
 class RunProgramSolution:
@@ -87,5 +95,6 @@ class RunProgramSolution:
     time: float | None = None
     status: RunProgramStatus | None = None
     type: typing.Literal["run_program"] = "run_program"
+
 
 Solution = typing.Union[CppOJSolution, CompileSolution, RunProgramSolution]

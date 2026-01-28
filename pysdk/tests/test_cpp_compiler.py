@@ -3,12 +3,14 @@ from agent_envs.executor import Executor
 from agent_envs.problems import CompileCPP, FileContent
 from agent_envs.solutions import CompileSolution
 
+
 async def test_compile():
     cli = ProxyClient(url="http://localhost:8080/execute")
 
     exec = Executor(cli)
     exec.register_queue("compile_cpp", "gcc_jobs")
-    resp = await exec.execute(problem=CompileCPP(
+    resp = await exec.execute(
+        problem=CompileCPP(
             files=[
                 FileContent(
                     filename="main.cpp",
@@ -22,7 +24,8 @@ int main() {
 """,
                 )
             ],
-        ))
+        )
+    )
     assert isinstance(resp, CompileSolution)
     assert resp.binary is not None
     assert resp.compile_error is None

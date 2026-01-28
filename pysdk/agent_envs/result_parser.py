@@ -16,6 +16,7 @@ import functools
 async def parse_result(problem: Problem, exec_result: ExecResult) -> Solution:
     raise NotImplementedError(f"Unsupported problem type: {problem.type}")
 
+
 def _ensure_succeed(exec_result: ExecResult):
     if exec_result.exit_code != 0:
         raise RuntimeError(
@@ -31,14 +32,14 @@ async def _(problem: CppOJ, exec_result: ExecResult) -> Solution:
     files = exec_result.file_dict()
     compile_error_file = files.get("workspace/compile_errors.txt")
     judge_result_file = files.get("workspace/judge_result.jsonl")
-    
+
     if compile_error_file is not None:
         compile_errors = compile_error_file.decode("utf-8")
         return CppOJSolution(results=[], compile_error=compile_errors)
 
     if judge_result_file is None:
         raise RuntimeError("Judge result file not found in execution result.")
-    
+
     content = judge_result_file.decode("utf-8")
     results = []
     for line in content.split("\n"):
@@ -47,8 +48,9 @@ async def _(problem: CppOJ, exec_result: ExecResult) -> Solution:
             continue
         js_line = json.loads(line)
         results.append(OJResult.from_json(js_line))
-    
+
     return CppOJSolution(results=results)
+
 
 @parse_result.register
 async def _(problem: CompileCPP, exec_result: ExecResult) -> Solution:
@@ -62,6 +64,7 @@ async def _(problem: CompileCPP, exec_result: ExecResult) -> Solution:
         compile_error = None
 
     return CompileSolution(binary=result_binary_file, compile_error=compile_error)
+
 
 @parse_result.register
 async def _(run_program: RunProgram, exec_result: ExecResult) -> Solution:
