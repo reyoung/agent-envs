@@ -159,46 +159,39 @@ func (s *proxyServer) handleBatchExecute(w http.ResponseWriter, r *http.Request)
 	writer := bufio.NewWriter(w)
 	encoder := json.NewEncoder(writer)
 
-	var (
-		lineNum int
-		items   []struct {
-			resp   Response
-			waiter *waiter
-		}
-	)
+	var waiters []*waiter
+	var responses []Response
 
 	for reader.Scan() {
-		lineNum++
-
 		line := bytes.TrimSpace(reader.Bytes())
-		var respLine Response
 		if len(line) == 0 {
-			respLine = Response{Error: "empty request"}
-		} else {
-			var req Request
-			if err := json.Unmarshal(line, &req); err != nil {
-				respLine = Response{
-					Error: fmt.Sprintf("line %d: invalid request body: %v", lineNum, err),
-				}
-			} else if err := normalizeRequest(&req); err != nil {
-				respLine = Response{Error: err.Error()}
-			} else {
-				wtr, _, err := s.prepareJob(r.Context(), req)
-				if err != nil {
-					respLine = Response{Error: err.Error()}
-				} else {
-					items = append(items, struct {
-						resp   Response
-						waiter *waiter
-					}{waiter: wtr})
-					continue
-				}
-			}
+			waiters = append(waiters, nil)
+			responses = append(responses, Response{Error: "empty request"})
+			continue
 		}
-		items = append(items, struct {
-			resp   Response
-			waiter *waiter
-		}{resp: respLine})
+
+		var req Request
+		if err := json.Unmarshal(line, &req); err != nil {
+			waiters = append(waiters, nil)
+			responses = append(responses, Response{Error: fmt.Sprintf("invalid request body: %v", err)})
+			continue
+		}
+
+		if err := normalizeRequest(&req); err != nil {
+			waiters = append(waiters, nil)
+			responses = append(responses, Response{Error: err.Error()})
+			continue
+		}
+
+		wtr, _, err := s.prepareJob(r.Context(), req)
+		if err != nil {
+			waiters = append(waiters, nil)
+			responses = append(responses, Response{Error: err.Error()})
+			continue
+		}
+
+		waiters = append(waiters, wtr)
+		responses = append(responses, Response{})
 	}
 
 	if err := reader.Err(); err != nil {
@@ -206,33 +199,43 @@ func (s *proxyServer) handleBatchExecute(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if len(items) == 0 && lineNum == 0 {
+	if len(waiters) == 0 {
 		http.Error(w, "empty request body", http.StatusBadRequest)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/x-ndjson")
 
-	for idx := range items {
-		item := &items[idx]
-		if item.waiter != nil {
-			resp, err := item.waiter.Wait(r.Context())
-			item.waiter.Close()
+	for idx, wtr := range waiters {
+		if wtr != nil {
+			resp, err := wtr.Wait(r.Context())
+			wtr.Close()
 			if err != nil {
-				item.resp = Response{Error: fmt.Sprintf("wait for callback: %v", err)}
+				responses[idx] = Response{Error: fmt.Sprintf("wait for callback: %v", err)}
 			} else {
-				item.resp = resp
+				responses[idx] = resp
 			}
+			waiters[idx] = nil
 		}
 
-		if err := encoder.Encode(item.resp); err != nil {
+		if err := encoder.Encode(responses[idx]); err != nil {
+			closeWaiters(waiters[idx+1:])
 			s.logger.Printf("write batch response: %v", err)
 			return
 		}
 
 		if err := writer.Flush(); err != nil {
+			closeWaiters(waiters[idx+1:])
 			s.logger.Printf("flush batch response: %v", err)
 			return
+		}
+	}
+}
+
+func closeWaiters(waiters []*waiter) {
+	for _, w := range waiters {
+		if w != nil {
+			w.Close()
 		}
 	}
 }
