@@ -556,6 +556,40 @@ class IOIJudger:
         self._thread_pool.shutdown(wait=True)
 
 
+async def _process_line(lock: asyncio.Lock, lineno: int, line: str, judger: IOIJudger):
+    line = line.strip()
+    if not line:
+        return
+    try:
+        result = await judger.judge(line, solution=None)
+    except Exception as e:
+        if isinstance(e, asyncio.CancelledError):
+            return False
+        print("Exception during judging line {}: {}{}".format(lineno, type(e), str(e)), file=sys.stderr)
+        async with lock:
+            with open("ioi_judge_errors.jsonl", "a", encoding="utf-8") as f:
+                json.dump({
+                    "line_no": lineno,
+                    "error": str(e),
+                    "line": line,
+                }, f)
+                f.write("\n")
+            return False
+        
+    if abs(result.score - 100.0) > 1e-6:
+        async with lock:
+            with open("ioi_judge_errors.jsonl", "a", encoding="utf-8") as f:
+                    json.dump({
+                        "line_no": lineno,
+                        "error": f"Expected score 100, got {result.score}. Reason: {result.reason}",
+                        "line": line,
+                    }, f)
+                    f.write("\n")
+        return False
+    return True
+
+
+
 async def amain():
     parser = argparse.ArgumentParser(description="Judge IOI-style problems from a JSONL file.")
     parser.add_argument(
@@ -574,7 +608,7 @@ async def amain():
         "--concurrency",
         "-c",
         type=int,
-        default=4,
+        default=2048,
         help="Max concurrent compile/run tasks.",
     )
     parser.add_argument(
@@ -589,6 +623,11 @@ async def amain():
         "-s",
         default=None,
         help="Optional path to a solution file overriding the sample solution in payloads.",
+    )
+    parser.add_argument(
+        "--line-concurrency",
+        type=int,
+        default=10,
     )
 
     args = parser.parse_args()
@@ -609,25 +648,21 @@ async def amain():
 
     judger = IOIJudger(concurrency=args.concurrency, endpoint=args.endpoint, num_threads=num_threads)
 
+    sem = asyncio.Semaphore(args.line_concurrency)
+    
+    def _done_callback(task: asyncio.Task):
+        sem.release()
+        if not task.result():
+            print("A line failed to judge. See ioi_judge_errors.jsonl for details.", file=sys.stderr)
+            sys.exit(1)
+
+    dump_lock = asyncio.Lock()
+
     try:
         for line_no, raw_line in enumerate(lines_iter, start=1):
-            line = raw_line.strip()
-            if not line:
-                continue
-            try:
-                result = await judger.judge(line, solution=solution_code)
-            except Exception as e:
-                print(f"Line {line_no}: judge failed with error: {e}", file=sys.stderr)
-                print(line, file=sys.stderr)
-                return 1
-
-            if abs(result.score - 100.0) > 1e-6:
-                print(
-                    f"Line {line_no}: expected score 100, got {result.score}. Reason: {result.reason}",
-                    file=sys.stderr,
-                )
-                print(line, file=sys.stderr)
-                return 1
+            await sem.acquire()
+            task = asyncio.create_task(_process_line(dump_lock, line_no, raw_line, judger))
+            task.add_done_callback(_done_callback)
     finally:
         if need_close:
             lines_iter.close()
