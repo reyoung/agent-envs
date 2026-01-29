@@ -130,7 +130,7 @@ func (s *proxyServer) handleExecute(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("invalid request body: %v", err), http.StatusBadRequest)
 		return
 	}
-	if err := normalizeRequest(&req); err != nil {
+	if err := req.normalize(); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -179,9 +179,15 @@ func (s *proxyServer) handleBatchExecute(w http.ResponseWriter, r *http.Request)
 	}()
 
 	for reader.Scan() {
+		select {
+		case <-r.Context().Done():
+			http.Error(w, "request canceled", http.StatusRequestTimeout)
+			return
+		default:
+		}
+
 		line := bytes.TrimSpace(reader.Bytes())
 		if len(line) == 0 {
-			waiterOrErrs = append(waiterOrErrs, waiterOrError{waiter: nil, err: fmt.Errorf("empty request line")})
 			continue
 		}
 
@@ -191,7 +197,7 @@ func (s *proxyServer) handleBatchExecute(w http.ResponseWriter, r *http.Request)
 			continue
 		}
 
-		if err := normalizeRequest(&req); err != nil {
+		if err := req.normalize(); err != nil {
 			waiterOrErrs = append(waiterOrErrs, waiterOrError{waiter: nil, err: err})
 			continue
 		}
@@ -250,10 +256,8 @@ func (s *proxyServer) handleBatchExecute(w http.ResponseWriter, r *http.Request)
 	}
 }
 
-func normalizeRequest(req *Request) error {
-	if req == nil {
-		return fmt.Errorf("request is nil")
-	}
+func (req *Request) normalize() error {
+
 	req.QueueName = strings.TrimSpace(req.QueueName)
 	if req.QueueName == "" {
 		return fmt.Errorf("queue_name is required")
