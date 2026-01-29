@@ -148,6 +148,18 @@ func (s *proxyServer) handleExecute(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+type waiterOrError struct {
+	waiter *waiter
+	err    error
+}
+
+func (w *waiterOrError) Close() error {
+	if w.waiter != nil {
+		w.waiter.Close()
+	}
+	return nil
+}
+
 func (s *proxyServer) handleBatchExecute(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -159,39 +171,37 @@ func (s *proxyServer) handleBatchExecute(w http.ResponseWriter, r *http.Request)
 	writer := bufio.NewWriter(w)
 	encoder := json.NewEncoder(writer)
 
-	var waiters []*waiter
-	var responses []Response
+	var waiterOrErrs []waiterOrError
+	defer func() {
+		for _, we := range waiterOrErrs {
+			we.Close()
+		}
+	}()
 
 	for reader.Scan() {
 		line := bytes.TrimSpace(reader.Bytes())
 		if len(line) == 0 {
-			waiters = append(waiters, nil)
-			responses = append(responses, Response{Error: "empty request"})
+			waiterOrErrs = append(waiterOrErrs, waiterOrError{waiter: nil, err: fmt.Errorf("empty request line")})
 			continue
 		}
 
 		var req Request
 		if err := json.Unmarshal(line, &req); err != nil {
-			waiters = append(waiters, nil)
-			responses = append(responses, Response{Error: fmt.Sprintf("invalid request body: %v", err)})
+			waiterOrErrs = append(waiterOrErrs, waiterOrError{waiter: nil, err: fmt.Errorf("invalid request line: %v", err)})
 			continue
 		}
 
 		if err := normalizeRequest(&req); err != nil {
-			waiters = append(waiters, nil)
-			responses = append(responses, Response{Error: err.Error()})
+			waiterOrErrs = append(waiterOrErrs, waiterOrError{waiter: nil, err: err})
 			continue
 		}
 
 		wtr, _, err := s.prepareJob(r.Context(), req)
 		if err != nil {
-			waiters = append(waiters, nil)
-			responses = append(responses, Response{Error: err.Error()})
+			waiterOrErrs = append(waiterOrErrs, waiterOrError{waiter: nil, err: fmt.Errorf("prepare job: %v", err)})
 			continue
 		}
-
-		waiters = append(waiters, wtr)
-		responses = append(responses, Response{})
+		waiterOrErrs = append(waiterOrErrs, waiterOrError{waiter: wtr, err: nil})
 	}
 
 	if err := reader.Err(); err != nil {
@@ -199,43 +209,43 @@ func (s *proxyServer) handleBatchExecute(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if len(waiters) == 0 {
+	if len(waiterOrErrs) == 0 {
 		http.Error(w, "empty request body", http.StatusBadRequest)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/x-ndjson")
 
-	for idx, wtr := range waiters {
-		if wtr != nil {
-			resp, err := wtr.Wait(r.Context())
-			wtr.Close()
-			if err != nil {
-				responses[idx] = Response{Error: fmt.Sprintf("wait for callback: %v", err)}
-			} else {
-				responses[idx] = resp
+	for _, wtr := range waiterOrErrs {
+		if wtr.err != nil {
+			resp := Response{Error: wtr.err.Error()}
+			if err := encoder.Encode(resp); err != nil {
+				s.logger.Printf("write batch response: %v", err)
+				return
 			}
-			waiters[idx] = nil
+			continue
 		}
 
-		if err := encoder.Encode(responses[idx]); err != nil {
-			closeWaiters(waiters[idx+1:])
+		if wtr.waiter == nil {
+			resp := Response{Error: "internal error: missing waiter"}
+			if err := encoder.Encode(resp); err != nil {
+				s.logger.Printf("write batch response: %v", err)
+				return
+			}
+			continue
+		}
+		resp, err := wtr.waiter.Wait(r.Context())
+		if err != nil {
+			resp := Response{Error: fmt.Sprintf("wait for callback: %v", err)}
+			if err := encoder.Encode(resp); err != nil {
+				s.logger.Printf("write batch response: %v", err)
+				return
+			}
+			continue
+		}
+		if err := encoder.Encode(resp); err != nil {
 			s.logger.Printf("write batch response: %v", err)
 			return
-		}
-
-		if err := writer.Flush(); err != nil {
-			closeWaiters(waiters[idx+1:])
-			s.logger.Printf("flush batch response: %v", err)
-			return
-		}
-	}
-}
-
-func closeWaiters(waiters []*waiter) {
-	for _, w := range waiters {
-		if w != nil {
-			w.Close()
 		}
 	}
 }
