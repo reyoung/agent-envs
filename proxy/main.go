@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -78,6 +81,7 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/batch_execute", server.handleBatchExecute)
 	mux.HandleFunc("/execute", server.handleExecute)
 	mux.HandleFunc("/callback/", server.handleCallback)
 
@@ -123,24 +127,121 @@ func (s *proxyServer) handleExecute(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("invalid request body: %v", err), http.StatusBadRequest)
 		return
 	}
-	req.QueueName = strings.TrimSpace(req.QueueName)
-	if req.QueueName == "" {
-		http.Error(w, "queue_name is required", http.StatusBadRequest)
-		return
-	}
-	if len(req.Binary) == 0 {
-		http.Error(w, "binary is required", http.StatusBadRequest)
+	if err := normalizeRequest(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
+	resp, err := s.executeRequest(r.Context(), req)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			status = http.StatusGatewayTimeout
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *proxyServer) handleBatchExecute(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	reader := bufio.NewReader(r.Body)
+	writer := bufio.NewWriter(w)
+	encoder := json.NewEncoder(writer)
+
+	var (
+		lineNum     int
+		wroteHeader bool
+	)
+
+	for {
+		line, readErr := reader.ReadBytes('\n')
+		if len(line) == 0 && readErr != nil {
+			if errors.Is(readErr, io.EOF) {
+				break
+			}
+			http.Error(w, fmt.Sprintf("read request: %v", readErr), http.StatusBadRequest)
+			return
+		}
+		if len(line) == 0 {
+			continue
+		}
+
+		lineNum++
+		if !wroteHeader {
+			w.Header().Set("Content-Type", "application/x-ndjson")
+			wroteHeader = true
+		}
+
+		line = bytes.TrimSpace(line)
+		var respLine Response
+		if len(line) == 0 {
+			respLine = Response{Error: "empty request"}
+		} else {
+			var req Request
+			if err := json.Unmarshal(line, &req); err != nil {
+				respLine = Response{
+					Error: fmt.Sprintf("line %d: invalid request body: %v", lineNum, err),
+				}
+			} else if err := normalizeRequest(&req); err != nil {
+				respLine = Response{Error: err.Error()}
+			} else {
+				result, execErr := s.executeRequest(r.Context(), req)
+				if execErr != nil {
+					respLine = Response{Error: execErr.Error()}
+				} else {
+					respLine = result
+				}
+			}
+		}
+
+		if err := encoder.Encode(respLine); err != nil {
+			s.logger.Printf("write batch response: %v", err)
+			return
+		}
+
+		if err := writer.Flush(); err != nil {
+			s.logger.Printf("flush batch response: %v", err)
+			return
+		}
+
+		if errors.Is(readErr, io.EOF) {
+			break
+		}
+	}
+
+	if !wroteHeader {
+		http.Error(w, "empty request body", http.StatusBadRequest)
+	}
+}
+
+func normalizeRequest(req *Request) error {
+	if req == nil {
+		return fmt.Errorf("request is nil")
+	}
+	req.QueueName = strings.TrimSpace(req.QueueName)
+	if req.QueueName == "" {
+		return fmt.Errorf("queue_name is required")
+	}
+	if len(req.Binary) == 0 {
+		return fmt.Errorf("binary is required")
+	}
+	return nil
+}
+
+func (s *proxyServer) executeRequest(ctx context.Context, req Request) (Response, error) {
 	jobID := uuid.NewString()
 	callbackURL := fmt.Sprintf("%s/callback/%s", s.callbackBase, jobID)
 
-	waitCtx := r.Context()
 	waiter, err := s.store.Waiter(jobID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("prepare waiter: %v", err), http.StatusInternalServerError)
-		return
+		return Response{}, fmt.Errorf("prepare waiter: %w", err)
 	}
 	defer waiter.Close()
 
@@ -152,22 +253,16 @@ func (s *proxyServer) handleExecute(w http.ResponseWriter, r *http.Request) {
 		Args:           req.Args,
 	}
 
-	if err := s.publisher.Enqueue(waitCtx, req.QueueName, spec); err != nil {
-		http.Error(w, fmt.Sprintf("enqueue job: %v", err), http.StatusInternalServerError)
-		return
+	if err := s.publisher.Enqueue(ctx, req.QueueName, spec); err != nil {
+		return Response{}, fmt.Errorf("enqueue job: %w", err)
 	}
 
-	resp, err := waiter.Wait(waitCtx)
+	resp, err := waiter.Wait(ctx)
 	if err != nil {
-		status := http.StatusInternalServerError
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			status = http.StatusGatewayTimeout
-		}
-		http.Error(w, fmt.Sprintf("wait for callback: %v", err), status)
-		return
+		return Response{}, fmt.Errorf("wait for callback: %w", err)
 	}
 
-	writeJSON(w, http.StatusOK, resp)
+	return resp, nil
 }
 
 func (s *proxyServer) handleCallback(w http.ResponseWriter, r *http.Request) {
