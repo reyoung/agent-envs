@@ -1,4 +1,4 @@
-from agent_envs.cmd.ioi_runner import IOIJudger, UnknownResult
+from agent_envs.cmd.ioi_runner import IOIJudger
 import os
 
 

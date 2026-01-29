@@ -129,11 +129,6 @@ rm ./solution_output.fifo
         
         raise NotImplementedError("Unsupported combination of solution/checker/manager binaries.")
 
-    def _build_run_program_with_manager_and_testlib_h(
-            self, files: dict[CommandType, bytes], problem: IOIProblem
-    ) -> RunProgram:
-        ...
-
 
 @dataclasses.dataclass(frozen=False)
 class RunTaskCase:
@@ -211,7 +206,7 @@ def _build_solution_compile_commands(files: dict[str, str]) -> CompileCPP:
                 content=files["grader.cpp"].encode("utf-8"),
             )
         )
-        
+
     elif "stub.cpp" in files:
         sources.append(
             FileContent(
@@ -221,7 +216,7 @@ def _build_solution_compile_commands(files: dict[str, str]) -> CompileCPP:
         )
 
     else:
-        raise RuntimeError("grader.cpp not found in grader files. file names {}".format(files.keys()))
+        raise RuntimeError("grader.cpp not found in grader files. file names {}".format(list(files.keys())))
 
     headers = [
         FileContent(
