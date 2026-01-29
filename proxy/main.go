@@ -8,7 +8,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
@@ -39,6 +38,10 @@ type Response struct {
 }
 
 const defaultTTL = 30 * time.Minute
+const (
+	batchInitialBuffer = 256 * 1024       // 256KB initial buffer
+	batchMaxBuffer     = 64 * 1024 * 1024 // 64MB hard cap
+)
 
 func main() {
 	var (
@@ -151,7 +154,8 @@ func (s *proxyServer) handleBatchExecute(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	reader := bufio.NewReader(r.Body)
+	reader := bufio.NewScanner(r.Body)
+	reader.Buffer(make([]byte, batchInitialBuffer), batchMaxBuffer)
 	writer := bufio.NewWriter(w)
 	encoder := json.NewEncoder(writer)
 
@@ -160,26 +164,14 @@ func (s *proxyServer) handleBatchExecute(w http.ResponseWriter, r *http.Request)
 		wroteHeader bool
 	)
 
-	for {
-		line, readErr := reader.ReadBytes('\n')
-		if len(line) == 0 && readErr != nil {
-			if errors.Is(readErr, io.EOF) {
-				break
-			}
-			http.Error(w, fmt.Sprintf("read request: %v", readErr), http.StatusBadRequest)
-			return
-		}
-		if len(line) == 0 {
-			continue
-		}
-
+	for reader.Scan() {
 		lineNum++
 		if !wroteHeader {
 			w.Header().Set("Content-Type", "application/x-ndjson")
 			wroteHeader = true
 		}
 
-		line = bytes.TrimSpace(line)
+		line := bytes.TrimSpace(reader.Bytes())
 		var respLine Response
 		if len(line) == 0 {
 			respLine = Response{Error: "empty request"}
@@ -210,13 +202,18 @@ func (s *proxyServer) handleBatchExecute(w http.ResponseWriter, r *http.Request)
 			s.logger.Printf("flush batch response: %v", err)
 			return
 		}
-
-		if errors.Is(readErr, io.EOF) {
-			break
-		}
 	}
 
-	if !wroteHeader {
+	if err := reader.Err(); err != nil {
+		if !wroteHeader {
+			http.Error(w, fmt.Sprintf("read request: %v", err), http.StatusBadRequest)
+		} else {
+			s.logger.Printf("batch read error: %v", err)
+		}
+		return
+	}
+
+	if !wroteHeader && lineNum == 0 {
 		http.Error(w, "empty request body", http.StatusBadRequest)
 	}
 }
