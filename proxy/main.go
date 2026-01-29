@@ -160,16 +160,15 @@ func (s *proxyServer) handleBatchExecute(w http.ResponseWriter, r *http.Request)
 	encoder := json.NewEncoder(writer)
 
 	var (
-		lineNum     int
-		wroteHeader bool
+		lineNum int
+		items   []struct {
+			resp   Response
+			waiter *waiter
+		}
 	)
 
 	for reader.Scan() {
 		lineNum++
-		if !wroteHeader {
-			w.Header().Set("Content-Type", "application/x-ndjson")
-			wroteHeader = true
-		}
 
 		line := bytes.TrimSpace(reader.Bytes())
 		var respLine Response
@@ -184,16 +183,49 @@ func (s *proxyServer) handleBatchExecute(w http.ResponseWriter, r *http.Request)
 			} else if err := normalizeRequest(&req); err != nil {
 				respLine = Response{Error: err.Error()}
 			} else {
-				result, execErr := s.executeRequest(r.Context(), req)
-				if execErr != nil {
-					respLine = Response{Error: execErr.Error()}
+				wtr, _, err := s.prepareJob(r.Context(), req)
+				if err != nil {
+					respLine = Response{Error: err.Error()}
 				} else {
-					respLine = result
+					items = append(items, struct {
+						resp   Response
+						waiter *waiter
+					}{waiter: wtr})
+					continue
 				}
 			}
 		}
+		items = append(items, struct {
+			resp   Response
+			waiter *waiter
+		}{resp: respLine})
+	}
 
-		if err := encoder.Encode(respLine); err != nil {
+	if err := reader.Err(); err != nil {
+		http.Error(w, fmt.Sprintf("read request: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	if len(items) == 0 && lineNum == 0 {
+		http.Error(w, "empty request body", http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/x-ndjson")
+
+	for idx := range items {
+		item := &items[idx]
+		if item.waiter != nil {
+			resp, err := item.waiter.Wait(r.Context())
+			item.waiter.Close()
+			if err != nil {
+				item.resp = Response{Error: fmt.Sprintf("wait for callback: %v", err)}
+			} else {
+				item.resp = resp
+			}
+		}
+
+		if err := encoder.Encode(item.resp); err != nil {
 			s.logger.Printf("write batch response: %v", err)
 			return
 		}
@@ -202,19 +234,6 @@ func (s *proxyServer) handleBatchExecute(w http.ResponseWriter, r *http.Request)
 			s.logger.Printf("flush batch response: %v", err)
 			return
 		}
-	}
-
-	if err := reader.Err(); err != nil {
-		if !wroteHeader {
-			http.Error(w, fmt.Sprintf("read request: %v", err), http.StatusBadRequest)
-		} else {
-			s.logger.Printf("batch read error: %v", err)
-		}
-		return
-	}
-
-	if !wroteHeader && lineNum == 0 {
-		http.Error(w, "empty request body", http.StatusBadRequest)
 	}
 }
 
@@ -233,14 +252,28 @@ func normalizeRequest(req *Request) error {
 }
 
 func (s *proxyServer) executeRequest(ctx context.Context, req Request) (Response, error) {
+	waiter, _, err := s.prepareJob(ctx, req)
+	if err != nil {
+		return Response{}, err
+	}
+	defer waiter.Close()
+
+	resp, err := waiter.Wait(ctx)
+	if err != nil {
+		return Response{}, fmt.Errorf("wait for callback: %w", err)
+	}
+
+	return resp, nil
+}
+
+func (s *proxyServer) prepareJob(ctx context.Context, req Request) (*waiter, string, error) {
 	jobID := uuid.NewString()
 	callbackURL := fmt.Sprintf("%s/callback/%s", s.callbackBase, jobID)
 
 	waiter, err := s.store.Waiter(jobID)
 	if err != nil {
-		return Response{}, fmt.Errorf("prepare waiter: %w", err)
+		return nil, "", fmt.Errorf("prepare waiter: %w", err)
 	}
-	defer waiter.Close()
 
 	spec := &jobqueue.JobSpec{
 		CallbackURL:    callbackURL,
@@ -251,15 +284,11 @@ func (s *proxyServer) executeRequest(ctx context.Context, req Request) (Response
 	}
 
 	if err := s.publisher.Enqueue(ctx, req.QueueName, spec); err != nil {
-		return Response{}, fmt.Errorf("enqueue job: %w", err)
+		waiter.Close()
+		return nil, "", fmt.Errorf("enqueue job: %w", err)
 	}
 
-	resp, err := waiter.Wait(ctx)
-	if err != nil {
-		return Response{}, fmt.Errorf("wait for callback: %w", err)
-	}
-
-	return resp, nil
+	return waiter, jobID, nil
 }
 
 func (s *proxyServer) handleCallback(w http.ResponseWriter, r *http.Request) {
