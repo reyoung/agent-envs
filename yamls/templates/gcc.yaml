@@ -32,6 +32,13 @@ spec:
       containers:
         - name: gcc-oj
           image: "gcc:15"
+          resources:
+            limits:
+              memory: "2.2Gi"
+              cpu: "2"
+            requests:
+              memory: "2.2Gi"
+              cpu: "2"
           securityContext:
             privileged: true
           env:

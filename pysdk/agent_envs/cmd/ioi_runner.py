@@ -123,9 +123,57 @@ wait $SOLUTION_PID
 rm ./solution_input.fifo
 rm ./solution_output.fifo                                                         
 """)
+            else:
+                if problem.problem_id == "stations" and problem.year == 2020:
+                    return self._shell(files, """#!/bin/bash
+#!/bin/bash
+set -e
+cd $(dirname $0)                                       
+mkfifo solution_input_0.fifo
+mkfifo solution_output_0.fifo
+mkfifo solution_input_1.fifo
+mkfifo solution_output_1.fifo
+
+./solution solution_input_0.fifo solution_output_0.fifo 0 &
+SOLUTION_0_PID=$!
+./solution solution_input_1.fifo solution_output_1.fifo 1 &
+SOLUTION_1_PID=$!
+./manager solution_output_0.fifo solution_input_0.fifo solution_output_1.fifo solution_input_1.fifo  < input.txt 
+
+trap "kill $SOLUTION_0_PID; kill $SOLUTION_1_PID" SIGINT
+trap "kill $SOLUTION_0_PID; kill $SOLUTION_1_PID" SIGTERM
+wait $SOLUTION_0_PID
+wait $SOLUTION_1_PID
+
+rm -f *.fifo                                       
+""")
 
 
-            raise NotImplementedError("Manager-only checking is not implemented.")
+
+                return self._shell(files, """#!/bin/bash
+#!/bin/bash
+set -e                                   
+cd $(dirname $0)
+mkfifo solution_input_0.fifo
+mkfifo solution_output_0.fifo
+mkfifo solution_input_1.fifo
+mkfifo solution_output_1.fifo
+
+./solution 0 < solution_input_0.fifo > solution_output_0.fifo &
+SOLUTION_0_PID=$!
+./solution 1 < solution_input_1.fifo > solution_output_1.fifo &
+SOLUTION_1_PID=$!
+./manager solution_output_0.fifo solution_input_0.fifo solution_output_1.fifo solution_input_1.fifo  < input.txt 
+
+trap "kill $SOLUTION_0_PID; kill $SOLUTION_1_PID" SIGINT
+trap "kill $SOLUTION_0_PID; kill $SOLUTION_1_PID" SIGTERM
+wait $SOLUTION_0_PID
+wait $SOLUTION_1_PID
+
+rm -f *.fifo                                   
+""")
+
+            raise NotImplementedError(f"Manager-only checking is not implemented. {problem._source_file_names}")
         
         raise NotImplementedError("Unsupported combination of solution/checker/manager binaries.")
 
@@ -344,11 +392,12 @@ class SystemError:
         return 0.0
 
 
+@dataclasses.dataclass(frozen=True)
 class TimeLimitExceeded:
     def get_score(self) -> float:
         return 0.0
 
-
+@dataclasses.dataclass(frozen=True)
 class MemoryLimitExceeded:
     def get_score(self) -> float:
         return 0.0
@@ -403,7 +452,10 @@ def _parse_result(result: RunProgramSolution) -> JudgeResult:
         return MemoryLimitExceeded()
 
     if result.status == RunProgramStatus.NORMAL:
-        score = float(result.stdout.decode("utf-8").strip())
+        try:
+            score = float(result.stdout.decode("utf-8").strip())
+        except ValueError:
+            return UnknownResult(solution=result)
         detail = result.stderr.decode("utf-8").strip()
         return JudgedScore(
             score=score,

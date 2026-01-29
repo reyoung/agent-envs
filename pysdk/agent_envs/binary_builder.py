@@ -194,6 +194,7 @@ async def _(run_program: RunProgram) -> BuildBinaryResult:
             os.chmod(f"{dirpath}/{file.filename}", 0o755)
 
         async with aiofiles.open(f"{dirpath}/run", "w") as f:
+            tl = run_program.time_limit * 2 if run_program.time_limit is not None else 1
             await f.write(
                 f"""#!/bin/bash
 set -e
@@ -201,8 +202,9 @@ cd $(dirname $0)
 ls -lha .
 echo "Running program: {shlex.quote(run_program.entrypoint)}"
 /envlet/runprog \
-    -tl {run_program.time_limit if run_program.time_limit is not None else 1:.4f}s \
+    -tl {tl:.4f}s \
     -ml {run_program.memory_limit_in_mb if run_program.memory_limit_in_mb is not None else 256}\
+    -rtl {tl*4:.4f}s \
     -res runprog.result \
     -runner container \
     -unsafe \
