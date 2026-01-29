@@ -14,7 +14,8 @@ import dataclasses
 import typing
 import math
 import enum
-
+import argparse
+import sys
 
 @dataclasses.dataclass(frozen=True)
 class SubTaskCase:
@@ -60,42 +61,78 @@ class RunProgramWithoutBinary:
         self.input = input
         self.output = output
         self.type: typing.Literal["run_program"] = "run_program"
+    
+    def _shell(
+            self, 
+            files: dict[CommandType, bytes],
+            entrypoint: str,
+    ) -> RunProgram:
+        file_list = [
+            FileContent(filename=cmd_type.value, content=content) for cmd_type, content in files.items()
+        ]
+        file_list.append(
+            FileContent(
+                filename="input.txt",
+                content=self.input.encode("utf-8"),
+            )
+        )
+        file_list.append(
+            FileContent(
+                filename="output.txt",
+                content=self.output.encode("utf-8"),
+            )
+        )
+        file_list.append(
+            FileContent(
+                filename="main.sh",
+                content=entrypoint.encode("utf-8"),
+            )
+        )
+        return RunProgram(
+            entrypoint="main.sh",
+            files=file_list,
+            time_limit=self.time_limit,
+            memory_limit_in_mb=self.memory_limit_in_mb,
+        )
 
-    def build(self, files: dict[CommandType, bytes], problem_id: str, year: int) -> RunProgram:
-        if CommandType.SOLUTION in files and CommandType.CHECKER in files and CommandType.MANAGER not in files:
-            return RunProgram(
-                entrypoint="main.sh",
-                files=[
-                    FileContent(
-                        filename=CommandType.SOLUTION.value,
-                        content=files[CommandType.SOLUTION],
-                    ),
-                    FileContent(
-                        filename=CommandType.CHECKER.value,
-                        content=files[CommandType.CHECKER],
-                    ),
-                    FileContent(
-                        filename="input.txt",
-                        content=self.input.encode("utf-8"),
-                    ),
-                    FileContent(
-                        filename="output.txt",
-                        content=self.output.encode("utf-8"),
-                    ),
-                    FileContent(
-                        filename="main.sh",
-                        content=f"""#!/bin/bash
+    def build(self, files: dict[CommandType, bytes], problem: IOIProblem) -> RunProgram:
+        if CommandType.CHECKER in files and CommandType.MANAGER not in files:
+            return self._shell(files, """#!/bin/bash
+set -e
+cd $(dirname $0)                          
+./solution < input.txt | ./checker input.txt /dev/stdin output.txt
+""")    
+        if CommandType.MANAGER in files and CommandType.CHECKER not in files:
+            if problem.has_src_file("testlib.h"):
+                return self._shell(files, """#!/bin/bash
 set -e
 cd $(dirname $0)
-./{CommandType.SOLUTION.value} < input.txt | ./{CommandType.CHECKER.value} input.txt /dev/stdin output.txt
-""".encode("utf-8"),
-                    ),
-                ],
-                time_limit=self.time_limit,
-                memory_limit_in_mb=self.memory_limit_in_mb,
-            )
-        else:
-            raise NotImplementedError("Unsupported combination of solution/checker/manager binaries.")
+mkfifo ./solution_input.fifo
+mkfifo ./solution_output.fifo
+./solution ./solution_input.fifo ./solution_output.fifo &
+SOLUTION_PID=$!
+./manager ./solution_output.fifo ./solution_input.fifo < ./input.txt  &
+MANAGER_PID=$!
+
+trap "kill -9 $MANAGER_PID; kill -9 $SOLUTION_PID" SIGINT
+trap "kill -9 $MANAGER_PID; kill -9 $SOLUTION_PID" SIGTERM
+
+wait $MANAGER_PID
+wait $SOLUTION_PID
+
+rm ./solution_input.fifo
+rm ./solution_output.fifo                                                         
+""")
+
+
+            raise NotImplementedError("Manager-only checking is not implemented.")
+        
+        raise NotImplementedError("Unsupported combination of solution/checker/manager binaries.")
+
+    def _build_run_program_with_manager_and_testlib_h(
+            self, files: dict[CommandType, bytes], problem: IOIProblem
+    ) -> RunProgram:
+        ...
 
 
 @dataclasses.dataclass(frozen=False)
@@ -174,8 +211,17 @@ def _build_solution_compile_commands(files: dict[str, str]) -> CompileCPP:
                 content=files["grader.cpp"].encode("utf-8"),
             )
         )
+        
+    elif "stub.cpp" in files:
+        sources.append(
+            FileContent(
+                filename="stub.cpp",
+                content=files["stub.cpp"].encode("utf-8"),
+            )
+        )
+
     else:
-        raise RuntimeError("grader.cpp not found in grader files.")
+        raise RuntimeError("grader.cpp not found in grader files. file names {}".format(files.keys()))
 
     headers = [
         FileContent(
@@ -259,6 +305,10 @@ class IOIProblem:
         test_cases = js["metadata"]["test_cases"]
         sub_tasks = js["metadata"]["sub_tasks"]
         self._check_tasks = _build_sub_task_case(test_cases, sub_tasks)
+        self._source_file_names = set(sources.keys())
+    
+    def has_src_file(self, filename: str) -> bool:
+        return filename in self._source_file_names
 
     @property
     def problem_id(self) -> str:
@@ -405,7 +455,7 @@ class IOIJudger:
         check_tasks = problem.check_tasks()
         check_task_futures: dict[SubTaskCase, asyncio.Task[Solution]] = {}
         for case_, run_task_case in check_tasks.test_cases.items():
-            run_program = run_task_case.problem.build(binaries, problem.problem_id, problem.year)
+            run_program = run_task_case.problem.build(binaries, problem)
             solution_task = await self._create_task(self._executor.execute(problem=run_program))
             check_task_futures[case_] = solution_task
 
@@ -459,8 +509,88 @@ class IOIJudger:
         self._thread_pool.shutdown(wait=True)
 
 
+async def amain():
+    parser = argparse.ArgumentParser(description="Judge IOI-style problems from a JSONL file.")
+    parser.add_argument(
+        "--jsonl",
+        "-f",
+        required=True,
+        help="Path to JSONL file containing judge payloads. Use '-' to read from stdin.",
+    )
+    parser.add_argument(
+        "--endpoint",
+        "-e",
+        default="http://127.0.0.1:8080/execute",
+        help="Proxy execute endpoint.",
+    )
+    parser.add_argument(
+        "--concurrency",
+        "-c",
+        type=int,
+        default=4,
+        help="Max concurrent compile/run tasks.",
+    )
+    parser.add_argument(
+        "--threads",
+        "-t",
+        type=int,
+        default=None,
+        help="Thread pool size for CPU-bound work (default: same as --concurrency).",
+    )
+    parser.add_argument(
+        "--solution-file",
+        "-s",
+        default=None,
+        help="Optional path to a solution file overriding the sample solution in payloads.",
+    )
+
+    args = parser.parse_args()
+
+    num_threads = args.threads if args.threads is not None else args.concurrency
+
+    solution_code: str | None = None
+    if args.solution_file is not None:
+        with open(args.solution_file, "r", encoding="utf-8") as f:
+            solution_code = f.read()
+
+    if args.jsonl == "-":
+        lines_iter = sys.stdin
+        need_close = False
+    else:
+        lines_iter = open(args.jsonl, "r", encoding="utf-8")
+        need_close = True
+
+    judger = IOIJudger(concurrency=args.concurrency, endpoint=args.endpoint, num_threads=num_threads)
+
+    try:
+        for line_no, raw_line in enumerate(lines_iter, start=1):
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                result = await judger.judge(line, solution=solution_code)
+            except Exception as e:
+                print(f"Line {line_no}: judge failed with error: {e}", file=sys.stderr)
+                print(line, file=sys.stderr)
+                return 1
+
+            if abs(result.score - 100.0) > 1e-6:
+                print(
+                    f"Line {line_no}: expected score 100, got {result.score}. Reason: {result.reason}",
+                    file=sys.stderr,
+                )
+                print(line, file=sys.stderr)
+                return 1
+    finally:
+        if need_close:
+            lines_iter.close()
+        await judger.close()
+
+    return 0
+
+
 def main():
-    pass
+    sys.exit(asyncio.run(amain()))
 
 
 if __name__ == "__main__":
