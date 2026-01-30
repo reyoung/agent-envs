@@ -1,11 +1,11 @@
-from agent_envs.proxy_client import ProxyClient
+from agent_envs.proxy_client import create_proxy_client
 from agent_envs.executor import Executor
 from agent_envs.problems import CompileCPP, FileContent
 from agent_envs.solutions import CompileSolution
 
 
 async def test_compile():
-    cli = ProxyClient(url="http://localhost:8080/execute")
+    cli = create_proxy_client(url="http://localhost:8080/execute")
 
     exec = Executor(cli)
     exec.register_queue("compile_cpp", "gcc_jobs")

@@ -3,6 +3,15 @@ revision = 3
 requires-python = ">=3.14"
 
 [[package]]
+name = "aioautobatch"
+version = "0.1.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/0f/1e/7f056a6298b66e6774d0e952c07ec1e98453fd74020c46a0bea31fbc8752/aioautobatch-0.1.2.tar.gz", hash = "sha256:225058432261a920894304cebb8ecfd3363517ac3e6e0a061a8ce44f1aea2a09", size = 4927, upload-time = "2026-01-30T03:35:43.381Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6b/7a/3713e065051dd7cdef586499918987f2a9b81cb394ba6b244d0e40bb455a/aioautobatch-0.1.2-py3-none-any.whl", hash = "sha256:df065524b6aa0ca1472c056a055d77d56e0233e71a613ae0ef4c893f047df857", size = 3302, upload-time = "2026-01-30T03:35:42.466Z" },
+]
+
+[[package]]
 name = "aiofiles"
 version = "25.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -191,6 +200,7 @@ name = "pysdk"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "aioautobatch" },
     { name = "aiofiles" },
     { name = "httpx" },
     { name = "pydantic" },
@@ -207,6 +217,7 @@ lint = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aioautobatch", specifier = ">=0.1.2" },
     { name = "aiofiles", specifier = ">=25.1.0" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "pydantic", specifier = ">=2.12.5" },
