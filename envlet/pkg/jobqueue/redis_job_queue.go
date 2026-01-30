@@ -46,7 +46,10 @@ func newRedisJobQueue(redisDSN string) (JobQueue, error) {
 }
 
 func (q *redisJobQueue) Fetch(ctx context.Context) (*JobSpec, error) {
+	begin := time.Now()
+	log.Printf("waiting for job from redis queue %q...", q.queueName)
 	result, err := q.client.BLPop(ctx, 0, q.queueName).Result()
+	log.Printf("waited %v for job from redis queue %q. err %v", time.Since(begin), q.queueName, err)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return nil, err

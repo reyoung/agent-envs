@@ -47,6 +47,8 @@ class ParsedSubTask:
     score: float
     cases: list[SubTaskCase]
 
+_T5_SET = set([(2022, "insects"), (2022, "towns"), (2024, "sphinx")])
+
 
 class RunProgramWithoutBinary:
     def __init__(
@@ -96,6 +98,9 @@ class RunProgramWithoutBinary:
         )
 
     def build(self, files: dict[CommandType, bytes], problem: IOIProblem) -> RunProgram:
+        if (problem.year, problem.problem_id) in _T5_SET:
+            # special handler for some problems
+            return self._t5_shell(files, problem)
         if CommandType.CHECKER in files and CommandType.MANAGER not in files:
             return self._shell(files, """#!/bin/bash
 set -e
@@ -104,6 +109,7 @@ cd $(dirname $0)
 """)    
         if CommandType.MANAGER in files and CommandType.CHECKER not in files:
             if problem.has_src_file("testlib.h"):
+
                 return self._shell(files, """#!/bin/bash
 set -e
 cd $(dirname $0)
@@ -123,11 +129,109 @@ wait $SOLUTION_PID
 rm ./solution_input.fifo
 rm ./solution_output.fifo                                                         
 """)
+            else:
+                if problem.problem_id == "stations" and problem.year == 2020:
+                    return self._shell(files, """#!/bin/bash
+#!/bin/bash
+set -e
+cd $(dirname $0)                                       
+mkfifo solution_input_0.fifo
+mkfifo solution_output_0.fifo
+mkfifo solution_input_1.fifo
+mkfifo solution_output_1.fifo
+
+./solution solution_input_0.fifo solution_output_0.fifo 0 &
+SOLUTION_0_PID=$!
+./solution solution_input_1.fifo solution_output_1.fifo 1 &
+SOLUTION_1_PID=$!
+./manager solution_output_0.fifo solution_input_0.fifo solution_output_1.fifo solution_input_1.fifo  < input.txt 
+
+trap "kill $SOLUTION_0_PID; kill $SOLUTION_1_PID" SIGINT
+trap "kill $SOLUTION_0_PID; kill $SOLUTION_1_PID" SIGTERM
+wait $SOLUTION_0_PID
+wait $SOLUTION_1_PID
+
+rm -f *.fifo                                       
+""")
 
 
-            raise NotImplementedError("Manager-only checking is not implemented.")
+
+                return self._shell(files, """#!/bin/bash
+
+set -e                                   
+cd $(dirname $0)
+mkfifo solution_input_0.fifo
+mkfifo solution_output_0.fifo
+mkfifo solution_input_1.fifo
+mkfifo solution_output_1.fifo
+
+./solution 0 < solution_input_0.fifo > solution_output_0.fifo &
+SOLUTION_0_PID=$!
+./solution 1 < solution_input_1.fifo > solution_output_1.fifo &
+SOLUTION_1_PID=$!
+./manager solution_output_0.fifo solution_input_0.fifo solution_output_1.fifo solution_input_1.fifo  < input.txt 
+
+trap "kill $SOLUTION_0_PID; kill $SOLUTION_1_PID" SIGINT
+trap "kill $SOLUTION_0_PID; kill $SOLUTION_1_PID" SIGTERM
+wait $SOLUTION_0_PID
+wait $SOLUTION_1_PID
+
+rm -f *.fifo                                   
+""")
+
+            raise NotImplementedError(f"Manager-only checking is not implemented. {problem._source_file_names}")
         
-        raise NotImplementedError("Unsupported combination of solution/checker/manager binaries.")
+        if CommandType.MANAGER in files and CommandType.CHECKER in files and CommandType.SOLUTION in files:
+            return self._shell(files, """#!/bin/bash
+set -e
+cd $(dirname $0)
+mkfifo solution_input.fifo
+mkfifo solution_output.fifo
+
+./solution <solution_input.fifo >solution_output.fifo &
+SOLUTION_PID=$!
+./manager < input.txt solution_output.fifo solution_input.fifo > answer_output.txt &
+MANAGER_PID=$!
+
+trap "kill -9 $SOLUTION_PID; kill -9 $MANAGER_PID" SIGINT
+trap "kill -9 $SOLUTION_PID; kill -9 $MANAGER_PID" SIGTERM
+
+wait $SOLUTION_PID
+wait $MANAGER_PID
+
+rm *.fifo
+
+./checker input.txt answer_output.txt output.txt                               
+""")
+
+        raise NotImplementedError(f"Unsupported combination of solution/checker/manager binaries. {files.keys()}")
+
+    def _t5_shell(
+            self, 
+            files: dict[CommandType, bytes],
+            problem: IOIProblem,
+    ) -> RunProgram:
+        return self._shell(files, """#!/bin/bash
+set -e
+cd $(dirname $0)
+                           
+mkfifo ./solution_input.fifo
+mkfifo ./solution_output.fifo
+
+./solution < ./solution_input.fifo > ./solution_output.fifo &
+SOLUTION_PID=$!
+./manager ./solution_output.fifo ./solution_input.fifo < ./input.txt  &
+MANAGER_PID=$!
+
+trap "kill -9 $MANAGER_PID; kill -9 $SOLUTION_PID" SIGINT
+trap "kill -9 $MANAGER_PID; kill -9 $SOLUTION_PID" SIGTERM
+
+wait $MANAGER_PID
+wait $SOLUTION_PID
+
+rm ./solution_input.fifo
+rm ./solution_output.fifo
+""")                           
 
 
 @dataclasses.dataclass(frozen=False)
@@ -344,11 +448,12 @@ class SystemError:
         return 0.0
 
 
+@dataclasses.dataclass(frozen=True)
 class TimeLimitExceeded:
     def get_score(self) -> float:
         return 0.0
 
-
+@dataclasses.dataclass(frozen=True)
 class MemoryLimitExceeded:
     def get_score(self) -> float:
         return 0.0
@@ -403,7 +508,10 @@ def _parse_result(result: RunProgramSolution) -> JudgeResult:
         return MemoryLimitExceeded()
 
     if result.status == RunProgramStatus.NORMAL:
-        score = float(result.stdout.decode("utf-8").strip())
+        try:
+            score = float(result.stdout.decode("utf-8").strip())
+        except ValueError:
+            return UnknownResult(solution=result)
         detail = result.stderr.decode("utf-8").strip()
         return JudgedScore(
             score=score,
@@ -421,8 +529,8 @@ T = typing.TypeVar("T")
 class IOIJudger:
     def __init__(self, concurrency: int, endpoint: str, num_threads: int) -> None:
         self._concurrency = asyncio.Semaphore(concurrency)
-        self._proxy_client = create_proxy_client(endpoint)
         self._thread_pool = ThreadPoolExecutor(max_workers=num_threads)
+        self._proxy_client = create_proxy_client(endpoint, executor=self._thread_pool)
         self._executor = Executor(self._proxy_client, build_binary_pool=self._thread_pool)
         self._executor.register_queue("compile_cpp", "gcc_jobs")
         self._executor.register_queue("run_program", "gcc_jobs")
@@ -504,6 +612,40 @@ class IOIJudger:
         self._thread_pool.shutdown(wait=True)
 
 
+async def _process_line(lock: asyncio.Lock, lineno: int, line: str, judger: IOIJudger):
+    line = line.strip()
+    if not line:
+        return
+    try:
+        result = await judger.judge(line, solution=None)
+    except Exception as e:
+        if isinstance(e, asyncio.CancelledError):
+            return False
+        print("Exception during judging line {}: {}{}".format(lineno, type(e), str(e)), file=sys.stderr)
+        async with lock:
+            with open("ioi_judge_errors.jsonl", "a", encoding="utf-8") as f:
+                json.dump({
+                    "line_no": lineno,
+                    "error": str(e),
+                    "line": line,
+                }, f)
+                f.write("\n")
+            return False
+        
+    if abs(result.score - 100.0) > 1e-6:
+        async with lock:
+            with open("ioi_judge_errors.jsonl", "a", encoding="utf-8") as f:
+                    json.dump({
+                        "line_no": lineno,
+                        "error": f"Expected score 100, got {result.score}. Reason: {result.reason}",
+                        "line": line,
+                    }, f)
+                    f.write("\n")
+        return False
+    return True
+
+
+
 async def amain():
     parser = argparse.ArgumentParser(description="Judge IOI-style problems from a JSONL file.")
     parser.add_argument(
@@ -522,7 +664,7 @@ async def amain():
         "--concurrency",
         "-c",
         type=int,
-        default=4,
+        default=2048,
         help="Max concurrent compile/run tasks.",
     )
     parser.add_argument(
@@ -537,6 +679,11 @@ async def amain():
         "-s",
         default=None,
         help="Optional path to a solution file overriding the sample solution in payloads.",
+    )
+    parser.add_argument(
+        "--line-concurrency",
+        type=int,
+        default=10,
     )
 
     args = parser.parse_args()
@@ -557,25 +704,21 @@ async def amain():
 
     judger = IOIJudger(concurrency=args.concurrency, endpoint=args.endpoint, num_threads=num_threads)
 
+    sem = asyncio.Semaphore(args.line_concurrency)
+    
+    def _done_callback(task: asyncio.Task):
+        sem.release()
+        if not task.result():
+            print("A line failed to judge. See ioi_judge_errors.jsonl for details.", file=sys.stderr)
+            sys.exit(1)
+
+    dump_lock = asyncio.Lock()
+
     try:
         for line_no, raw_line in enumerate(lines_iter, start=1):
-            line = raw_line.strip()
-            if not line:
-                continue
-            try:
-                result = await judger.judge(line, solution=solution_code)
-            except Exception as e:
-                print(f"Line {line_no}: judge failed with error: {e}", file=sys.stderr)
-                print(line, file=sys.stderr)
-                return 1
-
-            if abs(result.score - 100.0) > 1e-6:
-                print(
-                    f"Line {line_no}: expected score 100, got {result.score}. Reason: {result.reason}",
-                    file=sys.stderr,
-                )
-                print(line, file=sys.stderr)
-                return 1
+            await sem.acquire()
+            task = asyncio.create_task(_process_line(dump_lock, line_no, raw_line, judger))
+            task.add_done_callback(_done_callback)
     finally:
         if need_close:
             lines_iter.close()

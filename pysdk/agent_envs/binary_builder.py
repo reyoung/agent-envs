@@ -227,7 +227,8 @@ def _(run_program: RunProgram) -> BuildBinaryResult:
     for file in run_program.files:
         # Preserve executable bit for all provided files to mirror previous behavior
         files.append((file.filename, file.content, 0o755))
-
+    tl = run_program.time_limit if run_program.time_limit is not None else 1
+    tl *= 2
     run_script = textwrap.dedent(
         f"""\
         #!/bin/bash
@@ -236,7 +237,8 @@ def _(run_program: RunProgram) -> BuildBinaryResult:
         ls -lha .
         echo "Running program: {shlex_quote(run_program.entrypoint)}"
         /envlet/runprog \\
-            -tl {run_program.time_limit if run_program.time_limit is not None else 1:.4f}s \\
+            -tl {tl:.4f}s \\
+            -rtl {tl * 4:.4f}s \\
             -ml {run_program.memory_limit_in_mb if run_program.memory_limit_in_mb is not None else 256} \\
             -res runprog.result \\
             -runner container \\
