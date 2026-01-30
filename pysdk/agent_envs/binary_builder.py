@@ -237,7 +237,7 @@ def _(run_program: RunProgram) -> BuildBinaryResult:
         echo "Running program: {shlex_quote(run_program.entrypoint)}"
         /envlet/runprog \\
             -tl {run_program.time_limit if run_program.time_limit is not None else 1:.4f}s \\
-            -ml {run_program.memory_limit_in_mb if run_program.memory_limit_in_mb is not None else 256}\\
+            -ml {run_program.memory_limit_in_mb if run_program.memory_limit_in_mb is not None else 256} \\
             -res runprog.result \\
             -runner container \\
             -unsafe \\
