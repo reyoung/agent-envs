@@ -529,8 +529,8 @@ T = typing.TypeVar("T")
 class IOIJudger:
     def __init__(self, concurrency: int, endpoint: str, num_threads: int) -> None:
         self._concurrency = asyncio.Semaphore(concurrency)
-        self._proxy_client = create_proxy_client(endpoint)
         self._thread_pool = ThreadPoolExecutor(max_workers=num_threads)
+        self._proxy_client = create_proxy_client(endpoint, executor=self._thread_pool)
         self._executor = Executor(self._proxy_client, build_binary_pool=self._thread_pool)
         self._executor.register_queue("compile_cpp", "gcc_jobs")
         self._executor.register_queue("run_program", "gcc_jobs")

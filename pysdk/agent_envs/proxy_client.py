@@ -6,6 +6,7 @@ import base64
 import typing
 import aioautobatch
 import io
+from concurrent.futures import Executor
 
 @dataclasses.dataclass(frozen=True)
 class ExecRequest:
@@ -94,8 +95,8 @@ class _SingleProxyClient(ProxyClient):
 
 
 _auto_batch_kwargs = {
-    "start_delay": 0,
-    "max_delay": 1.0,
+    "start_delay": 1,
+    "max_delay": 5.0,
     "batch_size": 200,
     "max_concurrent_batches": None,  # No limit on concurrent batches
 }
@@ -144,7 +145,7 @@ class _BatchProxyClient(ProxyClient):
         await self._http_client.aclose()
 
 class _UnorderedBatchProxyClient(ProxyClient):
-    def __init__(self, url: str) -> None:
+    def __init__(self, url: str, executor: Executor | None) -> None:
         super().__init__()
         self._url = url
         self._http_client = _create_http_client()
@@ -153,6 +154,7 @@ class _UnorderedBatchProxyClient(ProxyClient):
             self._batch_execute,
             **_auto_batch_kwargs
         )
+        self._executor = executor
     
     async def execute(self, request: ExecRequest) -> ExecResult:
         val = await self._execute(request)
@@ -161,16 +163,29 @@ class _UnorderedBatchProxyClient(ProxyClient):
             raise err_or_result
         return err_or_result
     
-    async def _batch_execute(self, args_list: list[tuple[ExecRequest]], futures: list[asyncio.Future[ExecResult]]):
+    async def _as_req(self, args_list: list[tuple[ExecRequest]]) -> str:
+        if self._executor is not None:
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(
+                self._executor,
+                self._as_req_sync,
+                args_list
+            )
+        else:
+            return self._as_req_sync(args_list)
+
+    def _as_req_sync(self, args_list: list[tuple[ExecRequest]]) -> str:
         buf = io.StringIO()
-        for req_id, (request,) in enumerate(args_list):
+        for (req_id, (request,)) in enumerate(args_list):
             req_js = request.as_json()
             req_js["id"] = str(req_id)
             json.dump(req_js, buf)
             buf.write("\n")
-        
+        return buf.getvalue()
+    
+    async def _batch_execute(self, args_list: list[tuple[ExecRequest]], futures: list[asyncio.Future[ExecResult]]):        
         async with self._http_client.stream("POST", url=self._url, headers={"Content-Type": "application/x-ndjson"},
-                                            content=buf.getvalue()) as response:
+                                            content=await self._as_req(args_list)) as response:
             response.raise_for_status()
             internal_errors = []
             async for line in response.aiter_lines():
@@ -208,9 +223,9 @@ class _UnorderedBatchProxyClient(ProxyClient):
         await self._http_client.aclose()
 
 
-def create_proxy_client(url: str) -> ProxyClient:
+def create_proxy_client(url: str, executor: Executor | None = None) -> ProxyClient:
     if url.endswith("unordered_batch_execute"):
-        return _UnorderedBatchProxyClient(url)
+        return _UnorderedBatchProxyClient(url, executor)
     if url.endswith("batch_execute"):
         return _BatchProxyClient(url)
     if url.endswith("execute"):

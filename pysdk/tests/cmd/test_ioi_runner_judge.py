@@ -6,7 +6,7 @@ async def _do_test(js_name: str):
     with open(os.path.join(os.path.dirname(__file__), js_name), "r") as f:
         json_payload = f.read()
 
-    judger = IOIJudger(concurrency=1000, endpoint="http://127.0.0.1:8080/unordered_batch_execute", num_threads=1)
+    judger = IOIJudger(concurrency=1000, endpoint="http://127.0.0.1:8080/unordered_batch_execute", num_threads=16)
     try:
         res = await judger.judge(json_payload)
         assert isinstance(res.reason,dict)
