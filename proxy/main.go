@@ -8,6 +8,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -37,10 +38,20 @@ type Response struct {
 	Error  string                  `json:"error,omitempty"`
 }
 
+type RequestWithID struct {
+	ID string `json:"id"`
+	Request
+}
+
+type ResponseWithID struct {
+	ID string `json:"id"`
+	Response
+}
+
 const defaultTTL = 30 * time.Minute
 const (
-	batchInitialBuffer = 256 * 1024       // 256KB initial buffer
-	batchMaxBuffer     = 64 * 1024 * 1024 // 64MB hard cap
+	batchInitialBuffer = 4 * 1024 * 1024
+	batchMaxBuffer     = 64 * 1024 * 1024 // 64M hard cap
 )
 
 func main() {
@@ -84,6 +95,7 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/unordered_batch_execute", server.handleUnorderedBatchExecute)
 	mux.HandleFunc("/batch_execute", server.handleBatchExecute)
 	mux.HandleFunc("/execute", server.handleExecute)
 	mux.HandleFunc("/callback/", server.handleCallback)
@@ -261,6 +273,106 @@ func (s *proxyServer) handleBatchExecute(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
+}
+
+type jsonEncoder struct {
+	mu      sync.Mutex
+	encoder *json.Encoder
+}
+
+func newJSONEncoder(w io.Writer) *jsonEncoder {
+	return &jsonEncoder{
+		encoder: json.NewEncoder(w),
+	}
+}
+
+func (je *jsonEncoder) Encode(v interface{}) error {
+	je.mu.Lock()
+	defer je.mu.Unlock()
+	return je.encoder.Encode(v)
+}
+
+func (s *proxyServer) handleUnorderedBatchExecute(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	begin := time.Now()
+	reader := bufio.NewScanner(r.Body)
+	reader.Buffer(make([]byte, batchInitialBuffer), batchMaxBuffer)
+	w.Header().Set("Content-Type", "application/x-ndjson")
+	w.WriteHeader(http.StatusOK)
+	encoder := newJSONEncoder(w)
+	nJobs := 0
+	var complete sync.WaitGroup
+	defer func() {
+		complete.Wait()
+		s.logger.Printf("completed unordered batch in %s", time.Since(begin))
+	}()
+
+	for reader.Scan() {
+		select {
+		case <-r.Context().Done():
+			http.Error(w, "request canceled", http.StatusRequestTimeout)
+			return
+		default:
+		}
+		nJobs++
+
+		line := bytes.TrimSpace(reader.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+
+		var req RequestWithID
+		if err := json.Unmarshal(line, &req); err != nil {
+			log.Printf("decode request line: %v, line %s", err, string(line))
+			encoder.Encode(&ResponseWithID{ID: "", Response: Response{Error: fmt.Sprintf("invalid request line: %v", err)}})
+			return
+		}
+
+		req.ID = strings.TrimSpace(req.ID)
+		if req.ID == "" {
+			encoder.Encode(&ResponseWithID{ID: "", Response: Response{Error: "id is required"}})
+			return
+		}
+
+		if err := req.Request.normalize(); err != nil {
+			encoder.Encode(&ResponseWithID{ID: req.ID, Response: Response{Error: err.Error()}})
+			return
+		}
+
+		wtr, _, err := s.prepareJob(r.Context(), req.Request)
+		if err != nil {
+			encoder.Encode(&ResponseWithID{ID: req.ID, Response: Response{Error: fmt.Sprintf("prepare job: %v", err)}})
+			return
+		}
+		complete.Add(1)
+		go func() {
+			defer complete.Done()
+			defer wtr.Close()
+			resp, err := wtr.Wait(r.Context())
+			if err != nil {
+				encoder.Encode(&ResponseWithID{
+					ID: req.ID,
+					Response: Response{
+						Error: fmt.Sprintf("wait for callback: %v", err),
+					},
+				})
+				return
+			}
+			encoder.Encode(&ResponseWithID{
+				ID:       req.ID,
+				Response: resp,
+			})
+		}()
+	}
+
+	if err := reader.Err(); err != nil {
+		log.Printf("read request: %v", err)
+		return
+	}
+	log.Printf("submitted %d jobs in unordered batch", nJobs)
 }
 
 func (req *Request) normalize() error {

@@ -5,6 +5,7 @@ import dataclasses
 import base64
 import typing
 import aioautobatch
+import io
 
 @dataclasses.dataclass(frozen=True)
 class ExecRequest:
@@ -92,6 +93,14 @@ class _SingleProxyClient(ProxyClient):
         await self._http_client.aclose()
 
 
+_auto_batch_kwargs = {
+    "start_delay": 0,
+    "max_delay": 1.0,
+    "batch_size": 200,
+    "max_concurrent_batches": None,  # No limit on concurrent batches
+}
+
+
 class _BatchProxyClient(ProxyClient):
     def __init__(self, url: str) -> None:
         super().__init__()
@@ -100,10 +109,7 @@ class _BatchProxyClient(ProxyClient):
         
         self._execute = aioautobatch.autobatch(
             self._batch_execute,
-            start_delay=0.5,
-            max_delay=1.0,
-            batch_size=200,
-            max_concurrent_batches=None,  # No limit on concurrent batches
+            **_auto_batch_kwargs
         )
     
     async def execute(self, request: ExecRequest) -> ExecResult:
@@ -137,10 +143,77 @@ class _BatchProxyClient(ProxyClient):
     async def close(self):
         await self._http_client.aclose()
 
+class _UnorderedBatchProxyClient(ProxyClient):
+    def __init__(self, url: str) -> None:
+        super().__init__()
+        self._url = url
+        self._http_client = _create_http_client()
+        
+        self._execute = aioautobatch.autobatch(
+            self._batch_execute,
+            **_auto_batch_kwargs
+        )
+    
+    async def execute(self, request: ExecRequest) -> ExecResult:
+        val = await self._execute(request)
+        err_or_result = await val
+        if isinstance(err_or_result, Exception):
+            raise err_or_result
+        return err_or_result
+    
+    async def _batch_execute(self, args_list: list[tuple[ExecRequest]], futures: list[asyncio.Future[ExecResult]]):
+        buf = io.StringIO()
+        for req_id, (request,) in enumerate(args_list):
+            req_js = request.as_json()
+            req_js["id"] = str(req_id)
+            json.dump(req_js, buf)
+            buf.write("\n")
+        
+        async with self._http_client.stream("POST", url=self._url, headers={"Content-Type": "application/x-ndjson"},
+                                            content=buf.getvalue()) as response:
+            response.raise_for_status()
+            internal_errors = []
+            async for line in response.aiter_lines():
+                if not line:
+                    continue
+                
+                resp_json = json.loads(line.strip())
+                try:
+                    req_id_str: str = resp_json["id"]
+                except KeyError:
+                    internal_errors.append(resp_json.get("error", "Unknown error"))
+                    internal_errors.append(f"line {line}")
+                    continue
+                if req_id_str == "":
+                    internal_errors.append(resp_json.get("error", "Unknown error"))
+                    internal_errors.append(f"line {line}")
+                    continue
+                try:
+                    req_id = int(req_id_str)
+                except ValueError:
+                    internal_errors.append(f"Invalid request ID: {req_id_str}, line {line}")
+                    continue
+
+                fut = futures[req_id]
+
+                if "error" in resp_json:
+                    fut.set_exception(RuntimeError(f"Proxy server error: {resp_json['error']}"))
+                    continue
+                fut.set_result(ExecResult.from_json(resp_json["result"]))
+            
+            if internal_errors:
+                raise RuntimeError(f"Internal errors occurred during batch execution: {internal_errors}")
+
+    async def close(self):
+        await self._http_client.aclose()
+
+
 def create_proxy_client(url: str) -> ProxyClient:
+    if url.endswith("unordered_batch_execute"):
+        return _UnorderedBatchProxyClient(url)
     if url.endswith("batch_execute"):
         return _BatchProxyClient(url)
-    elif url.endswith("execute"):
+    if url.endswith("execute"):
         return _SingleProxyClient(url)
     else:
         raise ValueError(f"Invalid proxy URL: {url}")

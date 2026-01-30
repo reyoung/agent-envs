@@ -1,9 +1,9 @@
 from agent_envs.binary_builder import build_binary
-from agent_envs.problems import CppOJ, CompileCPP, FileContent, OJTestCase, RunProgram
+from agent_envs.problems import CppOJ, CompileCPP, FileContent, OJTestCase
 
 
-async def test_cpp_binary_builder():
-    bin = await build_binary(
+def test_cpp_binary_builder():
+    bin = build_binary(
         CppOJ(
             files=[
                 FileContent(
@@ -35,8 +35,8 @@ int main() {
     assert len(bin.binary) > 0
 
 
-async def test_compile_cpp_binary_builder():
-    bin = await build_binary(
+def test_compile_cpp_binary_builder():
+    bin = build_binary(
         CompileCPP(
             files=[
                 FileContent(
