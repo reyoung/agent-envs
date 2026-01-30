@@ -151,7 +151,7 @@ rm -f *.fifo
 
 
                 return self._shell(files, """#!/bin/bash
-#!/bin/bash
+
 set -e                                   
 cd $(dirname $0)
 mkfifo solution_input_0.fifo
@@ -175,7 +175,30 @@ rm -f *.fifo
 
             raise NotImplementedError(f"Manager-only checking is not implemented. {problem._source_file_names}")
         
-        raise NotImplementedError("Unsupported combination of solution/checker/manager binaries.")
+        if CommandType.MANAGER in files and CommandType.CHECKER in files and CommandType.SOLUTION in files:
+            return self._shell(files, """#!/bin/bash
+set -e
+cd $(dirname $0)
+mkfifo solution_input.fifo
+mkfifo solution_output.fifo
+
+./solution <solution_input.fifo >solution_output.fifo &
+SOLUTION_PID=$!
+./manager < input.txt solution_output.fifo solution_input.fifo > answer_output.txt &
+MANAGER_PID=$!
+
+trap "kill -9 $SOLUTION_PID; kill -9 $MANAGER_PID" SIGINT
+trap "kill -9 $SOLUTION_PID; kill -9 $MANAGER_PID" SIGTERM
+
+wait $SOLUTION_PID
+wait $MANAGER_PID
+
+rm *.fifo
+
+./checker input.txt answer_output.txt output.txt                               
+""")
+
+        raise NotImplementedError(f"Unsupported combination of solution/checker/manager binaries. {files.keys()}")
 
 
 @dataclasses.dataclass(frozen=False)

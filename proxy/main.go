@@ -165,6 +165,7 @@ func (s *proxyServer) handleBatchExecute(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	begin := time.Now()
 
 	reader := bufio.NewScanner(r.Body)
 	reader.Buffer(make([]byte, batchInitialBuffer), batchMaxBuffer)
@@ -222,6 +223,10 @@ func (s *proxyServer) handleBatchExecute(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusOK)
 
 	log.Printf("processing batch of %d requests", len(waiterOrErrs))
+
+	defer func() {
+		log.Printf("processed batch of %d requests in %v", len(waiterOrErrs), time.Since(begin))
+	}()
 	encoder := json.NewEncoder(w)
 
 	for _, wtr := range waiterOrErrs {

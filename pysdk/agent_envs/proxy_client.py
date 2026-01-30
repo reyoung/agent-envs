@@ -100,7 +100,7 @@ class _BatchProxyClient(ProxyClient):
         
         self._execute = aioautobatch.autobatch(
             self._batch_execute,
-            start_delay=0,
+            start_delay=0.5,
             max_delay=1.0,
             batch_size=200,
             max_concurrent_batches=None,  # No limit on concurrent batches
