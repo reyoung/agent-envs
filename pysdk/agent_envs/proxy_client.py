@@ -124,9 +124,9 @@ class _BatchProxyClient(ProxyClient):
                                                 content=content()) as response:
                 response.raise_for_status()
                 async for line in response.aiter_lines():
-                    resp_json = json.loads(line.strip())
                     if not line:
                         continue
+                    resp_json = json.loads(line.strip())
                     if "error" in resp_json:
                         res.append(RuntimeError(f"Proxy server error: {resp_json['error']}"))
                     res.append(ExecResult.from_json(resp_json["result"]))
