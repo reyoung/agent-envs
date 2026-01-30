@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -36,6 +38,10 @@ type Response struct {
 }
 
 const defaultTTL = 30 * time.Minute
+const (
+	batchInitialBuffer = 256 * 1024       // 256KB initial buffer
+	batchMaxBuffer     = 64 * 1024 * 1024 // 64MB hard cap
+)
 
 func main() {
 	var (
@@ -78,6 +84,7 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/batch_execute", server.handleBatchExecute)
 	mux.HandleFunc("/execute", server.handleExecute)
 	mux.HandleFunc("/callback/", server.handleCallback)
 
@@ -123,26 +130,167 @@ func (s *proxyServer) handleExecute(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("invalid request body: %v", err), http.StatusBadRequest)
 		return
 	}
-	req.QueueName = strings.TrimSpace(req.QueueName)
-	if req.QueueName == "" {
-		http.Error(w, "queue_name is required", http.StatusBadRequest)
-		return
-	}
-	if len(req.Binary) == 0 {
-		http.Error(w, "binary is required", http.StatusBadRequest)
+	if err := req.normalize(); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
+	resp, err := s.executeRequest(r.Context(), req)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			status = http.StatusGatewayTimeout
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
+type waiterOrError struct {
+	waiter *waiter
+	err    error
+}
+
+func (w *waiterOrError) Close() error {
+	if w.waiter != nil {
+		w.waiter.Close()
+	}
+	return nil
+}
+
+func (s *proxyServer) handleBatchExecute(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	reader := bufio.NewScanner(r.Body)
+	reader.Buffer(make([]byte, batchInitialBuffer), batchMaxBuffer)
+	writer := bufio.NewWriter(w)
+	encoder := json.NewEncoder(writer)
+
+	var waiterOrErrs []waiterOrError
+	defer func() {
+		for _, we := range waiterOrErrs {
+			we.Close()
+		}
+	}()
+
+	for reader.Scan() {
+		select {
+		case <-r.Context().Done():
+			http.Error(w, "request canceled", http.StatusRequestTimeout)
+			return
+		default:
+		}
+
+		line := bytes.TrimSpace(reader.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+
+		var req Request
+		if err := json.Unmarshal(line, &req); err != nil {
+			waiterOrErrs = append(waiterOrErrs, waiterOrError{waiter: nil, err: fmt.Errorf("invalid request line: %v", err)})
+			continue
+		}
+
+		if err := req.normalize(); err != nil {
+			waiterOrErrs = append(waiterOrErrs, waiterOrError{waiter: nil, err: err})
+			continue
+		}
+
+		wtr, _, err := s.prepareJob(r.Context(), req)
+		if err != nil {
+			waiterOrErrs = append(waiterOrErrs, waiterOrError{waiter: nil, err: fmt.Errorf("prepare job: %v", err)})
+			continue
+		}
+		waiterOrErrs = append(waiterOrErrs, waiterOrError{waiter: wtr, err: nil})
+	}
+
+	if err := reader.Err(); err != nil {
+		http.Error(w, fmt.Sprintf("read request: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	if len(waiterOrErrs) == 0 {
+		http.Error(w, "empty request body", http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/x-ndjson")
+
+	for _, wtr := range waiterOrErrs {
+		if wtr.err != nil {
+			resp := Response{Error: wtr.err.Error()}
+			if err := encoder.Encode(resp); err != nil {
+				s.logger.Printf("write batch response: %v", err)
+				return
+			}
+			continue
+		}
+
+		if wtr.waiter == nil {
+			resp := Response{Error: "internal error: missing waiter"}
+			if err := encoder.Encode(resp); err != nil {
+				s.logger.Printf("write batch response: %v", err)
+				return
+			}
+			continue
+		}
+		resp, err := wtr.waiter.Wait(r.Context())
+		if err != nil {
+			resp := Response{Error: fmt.Sprintf("wait for callback: %v", err)}
+			if err := encoder.Encode(resp); err != nil {
+				s.logger.Printf("write batch response: %v", err)
+				return
+			}
+			continue
+		}
+		if err := encoder.Encode(resp); err != nil {
+			s.logger.Printf("write batch response: %v", err)
+			return
+		}
+	}
+}
+
+func (req *Request) normalize() error {
+
+	req.QueueName = strings.TrimSpace(req.QueueName)
+	if req.QueueName == "" {
+		return fmt.Errorf("queue_name is required")
+	}
+	if len(req.Binary) == 0 {
+		return fmt.Errorf("binary is required")
+	}
+	return nil
+}
+
+func (s *proxyServer) executeRequest(ctx context.Context, req Request) (Response, error) {
+	waiter, _, err := s.prepareJob(ctx, req)
+	if err != nil {
+		return Response{}, err
+	}
+	defer waiter.Close()
+
+	resp, err := waiter.Wait(ctx)
+	if err != nil {
+		return Response{}, fmt.Errorf("wait for callback: %w", err)
+	}
+
+	return resp, nil
+}
+
+func (s *proxyServer) prepareJob(ctx context.Context, req Request) (*waiter, string, error) {
 	jobID := uuid.NewString()
 	callbackURL := fmt.Sprintf("%s/callback/%s", s.callbackBase, jobID)
 
-	waitCtx := r.Context()
 	waiter, err := s.store.Waiter(jobID)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("prepare waiter: %v", err), http.StatusInternalServerError)
-		return
+		return nil, "", fmt.Errorf("prepare waiter: %w", err)
 	}
-	defer waiter.Close()
 
 	spec := &jobqueue.JobSpec{
 		CallbackURL:    callbackURL,
@@ -152,22 +300,12 @@ func (s *proxyServer) handleExecute(w http.ResponseWriter, r *http.Request) {
 		Args:           req.Args,
 	}
 
-	if err := s.publisher.Enqueue(waitCtx, req.QueueName, spec); err != nil {
-		http.Error(w, fmt.Sprintf("enqueue job: %v", err), http.StatusInternalServerError)
-		return
+	if err := s.publisher.Enqueue(ctx, req.QueueName, spec); err != nil {
+		waiter.Close()
+		return nil, "", fmt.Errorf("enqueue job: %w", err)
 	}
 
-	resp, err := waiter.Wait(waitCtx)
-	if err != nil {
-		status := http.StatusInternalServerError
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			status = http.StatusGatewayTimeout
-		}
-		http.Error(w, fmt.Sprintf("wait for callback: %v", err), status)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, resp)
+	return waiter, jobID, nil
 }
 
 func (s *proxyServer) handleCallback(w http.ResponseWriter, r *http.Request) {
