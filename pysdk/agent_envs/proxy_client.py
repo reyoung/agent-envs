@@ -1,8 +1,10 @@
+import asyncio
 import json
 import httpx
 import dataclasses
 import base64
-
+import typing
+import aioautobatch
 
 @dataclasses.dataclass(frozen=True)
 class ExecRequest:
@@ -59,12 +61,24 @@ class ExecResult:
 
     def file_dict(self) -> dict[str, bytes]:
         return {f.filename: f.content for f in self.files}
+    
 
+class ProxyClient(typing.Protocol):
+    def execute(self, request: ExecRequest) -> typing.Awaitable[ExecResult]:
+        ...
 
-class ProxyClient:
+    async def close(self):
+        ...
+
+def _create_http_client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(timeout=httpx.Timeout(60.0, read=1800.0), limits=httpx.Limits(
+        max_keepalive_connections=100, max_connections=65535
+    ))
+
+class _SingleProxyClient(ProxyClient):
     def __init__(self, url: str):
         self._url = url
-        self._http_client = httpx.AsyncClient(timeout=httpx.Timeout(60.0, read=1800.0))
+        self._http_client = _create_http_client()
 
     async def execute(self, request: ExecRequest) -> ExecResult:
         resp = await self._http_client.post(url=self._url, json=request.as_json())
@@ -76,3 +90,57 @@ class ProxyClient:
 
     async def close(self):
         await self._http_client.aclose()
+
+
+class _BatchProxyClient(ProxyClient):
+    def __init__(self, url: str) -> None:
+        super().__init__()
+        self._url = url
+        self._http_client = _create_http_client()
+        
+        self._execute = aioautobatch.autobatch(
+            self._batch_execute,
+            start_delay=0,
+            max_delay=1.0,
+            batch_size=200,
+            max_concurrent_batches=None,  # No limit on concurrent batches
+        )
+    
+    async def execute(self, request: ExecRequest) -> ExecResult:
+        val = await self._execute(request)
+        err_or_result = await val
+        if isinstance(err_or_result, Exception):
+            raise err_or_result
+        return err_or_result
+    
+    async def _batch_execute(self, args_list: list[tuple[ExecRequest]]) -> list[ExecResult | Exception]:
+            async def content():
+                for (request,) in args_list:
+                    yield json.dumps(request.as_json()).encode("utf-8") + b"\n"
+                    
+            res = []
+
+            async with self._http_client.stream("POST", url=self._url, headers={"Content-Type": "application/x-ndjson"},
+                                                content=content()) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if not line:
+                        continue
+                    resp_json = json.loads(line.strip())
+                    if "error" in resp_json:
+                        res.append(RuntimeError(f"Proxy server error: {resp_json['error']}"))
+                    res.append(ExecResult.from_json(resp_json["result"]))
+            if len(res) != len(args_list):
+                raise RuntimeError(f"Batch execute returned {len(res)} results, expected {len(args_list)}")
+            return res
+
+    async def close(self):
+        await self._http_client.aclose()
+
+def create_proxy_client(url: str) -> ProxyClient:
+    if url.endswith("batch_execute"):
+        return _BatchProxyClient(url)
+    elif url.endswith("execute"):
+        return _SingleProxyClient(url)
+    else:
+        raise ValueError(f"Invalid proxy URL: {url}")

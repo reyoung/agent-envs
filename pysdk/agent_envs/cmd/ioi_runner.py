@@ -1,5 +1,5 @@
 import asyncio
-from agent_envs.proxy_client import ProxyClient
+from agent_envs.proxy_client import create_proxy_client
 from agent_envs.executor import Executor
 from agent_envs.problems import CompileCPP, RunProgram, FileContent
 from agent_envs.solutions import (
@@ -421,7 +421,7 @@ T = typing.TypeVar("T")
 class IOIJudger:
     def __init__(self, concurrency: int, endpoint: str, num_threads: int) -> None:
         self._concurrency = asyncio.Semaphore(concurrency)
-        self._proxy_client = ProxyClient(endpoint)
+        self._proxy_client = create_proxy_client(endpoint)
         self._executor = Executor(self._proxy_client)
         self._executor.register_queue("compile_cpp", "gcc_jobs")
         self._executor.register_queue("run_program", "gcc_jobs")
@@ -515,7 +515,7 @@ async def amain():
     parser.add_argument(
         "--endpoint",
         "-e",
-        default="http://127.0.0.1:8080/execute",
+        default="http://127.0.0.1:8080/batch_execute",
         help="Proxy execute endpoint.",
     )
     parser.add_argument(

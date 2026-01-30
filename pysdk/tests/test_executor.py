@@ -1,11 +1,11 @@
-from agent_envs.proxy_client import ProxyClient
+from agent_envs.proxy_client import create_proxy_client
 from agent_envs.executor import Executor
 from agent_envs.problems import CppOJ, FileContent, OJTestCase
 from agent_envs.solutions import OJResultStatus
 
 
 async def test_proxy_client_initialization():
-    cli = ProxyClient(url="http://localhost:8080/execute")
+    cli = create_proxy_client(url="http://localhost:8080/batch_execute")
 
     exec = Executor(cli)
     exec.register_queue("cpp_oj", "gcc_jobs")
