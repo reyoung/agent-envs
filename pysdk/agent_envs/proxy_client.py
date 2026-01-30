@@ -98,8 +98,12 @@ class _BatchProxyClient(ProxyClient):
         self._url = url
         self._http_client = _create_http_client()
         
-        self._execute: typing.Callable[[ExecRequest], typing.Awaitable[asyncio.Future[ExecResult]]] = aioautobatch.autobatch(
-            self._batch_execute, # type: ignore
+        self._execute = aioautobatch.autobatch(
+            self._batch_execute,
+            start_delay=0,
+            max_delay=1.0,
+            batch_size=200,
+            max_concurrent_batches=None,  # No limit on concurrent batches
         )
     
     async def execute(self, request: ExecRequest) -> ExecResult:
@@ -109,9 +113,9 @@ class _BatchProxyClient(ProxyClient):
             raise err_or_result
         return err_or_result
     
-    async def _batch_execute(self, requests: list[tuple[ExecRequest]]) -> list[ExecResult | Exception]:
+    async def _batch_execute(self, args_list: list[tuple[ExecRequest]]) -> list[ExecResult | Exception]:
             async def content():
-                for (request,) in requests:
+                for (request,) in args_list:
                     yield json.dumps(request.as_json()).encode("utf-8") + b"\n"
                     
             res = []
