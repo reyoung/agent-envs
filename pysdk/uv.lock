@@ -4,11 +4,11 @@ requires-python = ">=3.14"
 
 [[package]]
 name = "aioautobatch"
-version = "0.1.2"
+version = "0.1.4"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/0f/1e/7f056a6298b66e6774d0e952c07ec1e98453fd74020c46a0bea31fbc8752/aioautobatch-0.1.2.tar.gz", hash = "sha256:225058432261a920894304cebb8ecfd3363517ac3e6e0a061a8ce44f1aea2a09", size = 4927, upload-time = "2026-01-30T03:35:43.381Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/6a/d1/498297aaca7202febac2916eddf4e3b90a3bbdef6f92dbe8b7b9934c61a9/aioautobatch-0.1.4.tar.gz", hash = "sha256:04859c5d7a4add60a77a3c6f2eb9904409465eccfd993e16dbb81fbbb4fcc152", size = 5469, upload-time = "2026-01-30T06:40:54.492Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/6b/7a/3713e065051dd7cdef586499918987f2a9b81cb394ba6b244d0e40bb455a/aioautobatch-0.1.2-py3-none-any.whl", hash = "sha256:df065524b6aa0ca1472c056a055d77d56e0233e71a613ae0ef4c893f047df857", size = 3302, upload-time = "2026-01-30T03:35:42.466Z" },
+    { url = "https://files.pythonhosted.org/packages/d3/21/2def84624aa018ca1f735edca7d7c6baac8816e21774bac83d0ae7ea25f1/aioautobatch-0.1.4-py3-none-any.whl", hash = "sha256:7922ed8a1308967010162728f7008b54332d9c7aefc673da5d6c14b7cba98446", size = 3562, upload-time = "2026-01-30T06:40:53.512Z" },
 ]
 
 [[package]]
