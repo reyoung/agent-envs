@@ -168,8 +168,6 @@ func (s *proxyServer) handleBatchExecute(w http.ResponseWriter, r *http.Request)
 
 	reader := bufio.NewScanner(r.Body)
 	reader.Buffer(make([]byte, batchInitialBuffer), batchMaxBuffer)
-	writer := bufio.NewWriter(w)
-	encoder := json.NewEncoder(writer)
 
 	var waiterOrErrs []waiterOrError
 	defer func() {
@@ -221,6 +219,10 @@ func (s *proxyServer) handleBatchExecute(w http.ResponseWriter, r *http.Request)
 	}
 
 	w.Header().Set("Content-Type", "application/x-ndjson")
+	w.WriteHeader(http.StatusOK)
+
+	log.Printf("processing batch of %d requests", len(waiterOrErrs))
+	encoder := json.NewEncoder(w)
 
 	for _, wtr := range waiterOrErrs {
 		if wtr.err != nil {
