@@ -124,13 +124,14 @@ class _BatchProxyClient(ProxyClient):
                                                 content=content()) as response:
                 response.raise_for_status()
                 async for line in response.aiter_lines():
-                    resp_json = json.loads(line.strip())
                     if not line:
                         continue
+                    resp_json = json.loads(line.strip())
                     if "error" in resp_json:
                         res.append(RuntimeError(f"Proxy server error: {resp_json['error']}"))
                     res.append(ExecResult.from_json(resp_json["result"]))
-            
+            if len(res) != len(args_list):
+                raise RuntimeError(f"Batch execute returned {len(res)} results, expected {len(args_list)}")
             return res
 
     async def close(self):
@@ -143,4 +144,3 @@ def create_proxy_client(url: str) -> ProxyClient:
         return _SingleProxyClient(url)
     else:
         raise ValueError(f"Invalid proxy URL: {url}")
-
