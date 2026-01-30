@@ -5,6 +5,7 @@ import dataclasses
 import base64
 import typing
 import aioautobatch
+import io
 
 @dataclasses.dataclass(frozen=True)
 class ExecRequest:
@@ -161,23 +162,28 @@ class _UnorderedBatchProxyClient(ProxyClient):
         return err_or_result
     
     async def _batch_execute(self, args_list: list[tuple[ExecRequest]], futures: list[asyncio.Future[ExecResult]]):
-        async def content():
-            for req_id, (request,) in enumerate(args_list):
-                req_js = request.as_json()
-                req_js["id"] = str(req_id)
-                str_buf = json.dumps(req_js)
-                assert "\n" not in str_buf
-                yield str_buf.encode("utf-8") + b"\n"
+        buf = io.StringIO()
+        for req_id, (request,) in enumerate(args_list):
+            req_js = request.as_json()
+            req_js["id"] = str(req_id)
+            json.dump(req_js, buf)
+            buf.write("\n")
         
         async with self._http_client.stream("POST", url=self._url, headers={"Content-Type": "application/x-ndjson"},
-                                            content=content()) as response:
+                                            content=buf.getvalue()) as response:
             response.raise_for_status()
             internal_errors = []
             async for line in response.aiter_lines():
                 if not line:
                     continue
+                
                 resp_json = json.loads(line.strip())
-                req_id_str: str = resp_json["id"]
+                try:
+                    req_id_str: str = resp_json["id"]
+                except KeyError:
+                    internal_errors.append(resp_json.get("error", "Unknown error"))
+                    internal_errors.append(f"line {line}")
+                    continue
                 if req_id_str == "":
                     internal_errors.append(resp_json.get("error", "Unknown error"))
                     internal_errors.append(f"line {line}")
