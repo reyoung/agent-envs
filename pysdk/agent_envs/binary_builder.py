@@ -44,14 +44,17 @@ def _tar_gz_bytes(files: Iterable[tuple[str, bytes, int]]) -> bytes:
 def _self_extracting_script(payload_tar_gz: bytes, command: str) -> bytes:
     """
     Generate a bash self-extracting archive script similar to makeself.
+    The tar.gz payload is concatenated directly after the shell script; a
+    precomputed byte offset is used to slice the payload without base64 bloat.
     Supports a minimal CLI: --target <dir> to control extraction path.
     """
-    payload_b64 = base64.b64encode(payload_tar_gz).decode("ascii")
-
-    script = f"""#!/bin/bash
+    payload_offset_placeholder = "__PAYLOAD_OFFSET__"
+    script_template = f"""#!/bin/bash
 set -euo pipefail
 
 PAYLOAD_CMD={json.dumps(command)}
+PAYLOAD_OFFSET={payload_offset_placeholder}
+PAYLOAD_START=$((10#$PAYLOAD_OFFSET))
 
 usage() {{
   echo "Usage: $0 [--target DIR]"
@@ -81,17 +84,21 @@ else
   mkdir -p "$WORKDIR"
 fi
 
-ARCHIVE_LINE=$(awk '/^__ARCHIVE_BELOW__/ {{print NR + 1; exit 0;}}' "$0")
-tail -n +"$ARCHIVE_LINE" "$0" | base64 -d | tar -xz -C "$WORKDIR"
+tail -c +"$PAYLOAD_START" "$0" | tar -xz -C "$WORKDIR"
 
 cd "$WORKDIR"
 bash "$PAYLOAD_CMD"
 exit $?
-__ARCHIVE_BELOW__
-{payload_b64}
 """
-    # Ensure trailing newline for POSIX shells
-    return script.encode("utf-8")
+
+    # Calculate payload start (tail -c uses 1-based indexing).
+    header_len = len(script_template.encode("utf-8"))
+    payload_offset = header_len + 1
+    offset_str = str(payload_offset).rjust(len(payload_offset_placeholder), "0")
+    script = script_template.replace(payload_offset_placeholder, offset_str)
+
+    # Ensure trailing newline for POSIX shells, then append raw payload bytes.
+    return script.encode("utf-8") + payload_tar_gz
 
 
 def _cpp_build_sh(source_files: list[str]) -> bytes:
