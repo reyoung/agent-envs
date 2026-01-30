@@ -50,8 +50,8 @@ type ResponseWithID struct {
 
 const defaultTTL = 30 * time.Minute
 const (
-	batchInitialBuffer = 256 * 1024       // 256KB initial buffer
-	batchMaxBuffer     = 64 * 1024 * 1024 // 64MB hard cap
+	batchInitialBuffer = 4 * 1024 * 1024
+	batchMaxBuffer     = 64 * 1024 * 1024 // 64M hard cap
 )
 
 func main() {
@@ -292,15 +292,17 @@ func (s *proxyServer) handleUnorderedBatchExecute(w http.ResponseWriter, r *http
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-
+	begin := time.Now()
 	reader := bufio.NewScanner(r.Body)
 	reader.Buffer(make([]byte, batchInitialBuffer), batchMaxBuffer)
 	w.Header().Set("Content-Type", "application/x-ndjson")
 	w.WriteHeader(http.StatusOK)
 	encoder := newJSONEncoder(w)
+	nJobs := 0
 	var complete sync.WaitGroup
 	defer func() {
 		complete.Wait()
+		s.logger.Printf("completed unordered batch in %s", time.Since(begin))
 	}()
 
 	for reader.Scan() {
@@ -310,6 +312,7 @@ func (s *proxyServer) handleUnorderedBatchExecute(w http.ResponseWriter, r *http
 			return
 		default:
 		}
+		nJobs++
 
 		line := bytes.TrimSpace(reader.Bytes())
 		if len(line) == 0 {
@@ -318,6 +321,7 @@ func (s *proxyServer) handleUnorderedBatchExecute(w http.ResponseWriter, r *http
 
 		var req RequestWithID
 		if err := json.Unmarshal(line, &req); err != nil {
+			log.Printf("decode request line: %v, line %s", err, string(line))
 			encoder.Encode(&ResponseWithID{ID: "", Response: Response{Error: fmt.Sprintf("invalid request line: %v", err)}})
 			return
 		}
@@ -363,6 +367,7 @@ func (s *proxyServer) handleUnorderedBatchExecute(w http.ResponseWriter, r *http
 		log.Printf("read request: %v", err)
 		return
 	}
+	log.Printf("submitted %d jobs in unordered batch", nJobs)
 }
 
 func (req *Request) normalize() error {
