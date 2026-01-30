@@ -47,6 +47,8 @@ class ParsedSubTask:
     score: float
     cases: list[SubTaskCase]
 
+_T5_SET = set([(2022, "insects"), (2022, "towns"), (2024, "sphinx")])
+
 
 class RunProgramWithoutBinary:
     def __init__(
@@ -96,6 +98,9 @@ class RunProgramWithoutBinary:
         )
 
     def build(self, files: dict[CommandType, bytes], problem: IOIProblem) -> RunProgram:
+        if (problem.year, problem.problem_id) in _T5_SET:
+            # special handler for some problems
+            return self._t5_shell(files, problem)
         if CommandType.CHECKER in files and CommandType.MANAGER not in files:
             return self._shell(files, """#!/bin/bash
 set -e
@@ -104,6 +109,7 @@ cd $(dirname $0)
 """)    
         if CommandType.MANAGER in files and CommandType.CHECKER not in files:
             if problem.has_src_file("testlib.h"):
+
                 return self._shell(files, """#!/bin/bash
 set -e
 cd $(dirname $0)
@@ -199,6 +205,33 @@ rm *.fifo
 """)
 
         raise NotImplementedError(f"Unsupported combination of solution/checker/manager binaries. {files.keys()}")
+
+    def _t5_shell(
+            self, 
+            files: dict[CommandType, bytes],
+            problem: IOIProblem,
+    ) -> RunProgram:
+        return self._shell(files, """#!/bin/bash
+set -e
+cd $(dirname $0)
+                           
+mkfifo ./solution_input.fifo
+mkfifo ./solution_output.fifo
+
+./solution < ./solution_input.fifo > ./solution_output.fifo &
+SOLUTION_PID=$!
+./manager ./solution_output.fifo ./solution_input.fifo < ./input.txt  &
+MANAGER_PID=$!
+
+trap "kill -9 $MANAGER_PID; kill -9 $SOLUTION_PID" SIGINT
+trap "kill -9 $MANAGER_PID; kill -9 $SOLUTION_PID" SIGTERM
+
+wait $MANAGER_PID
+wait $SOLUTION_PID
+
+rm ./solution_input.fifo
+rm ./solution_output.fifo
+""")                           
 
 
 @dataclasses.dataclass(frozen=False)

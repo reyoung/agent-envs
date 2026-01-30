@@ -32,3 +32,6 @@ async def test_ioi_judger_3():
 
 async def test_ioi_judger_4():
     await _do_test("test_ioi_runner_4.json")
+
+async def test_ioi_judger_5():
+    await _do_test("test_ioi_runner_5.json")    
