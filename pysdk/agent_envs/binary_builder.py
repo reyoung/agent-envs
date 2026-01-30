@@ -243,7 +243,7 @@ def _(run_program: RunProgram) -> BuildBinaryResult:
             -unsafe \\
             -cgroup \\
             -bind-pwd \\
-            "$PWD/{shlex_quote(run_program.entrypoint)}" 1> program.stdout 2> program.stderr
+            $PWD/{shlex_quote(run_program.entrypoint)} 1> program.stdout 2> program.stderr
         """
     ).encode("utf-8")
 
