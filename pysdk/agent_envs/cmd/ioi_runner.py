@@ -515,7 +515,7 @@ async def amain():
     parser.add_argument(
         "--endpoint",
         "-e",
-        default="http://127.0.0.1:8080/execute",
+        default="http://127.0.0.1:8080/batch_execute",
         help="Proxy execute endpoint.",
     )
     parser.add_argument(
