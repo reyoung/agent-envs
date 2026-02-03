@@ -1,0 +1,24 @@
+syntax = "proto3";
+package proto;
+
+message ExecRequest {
+  string          queue_name      = 1;
+  bytes           binary          = 2;
+  string          capture_pattern = 3;
+  repeated string args            = 4;
+}
+
+message ExecResponse {
+  uint32 exit_code = 1;
+  bytes  stdout    = 2;
+  bytes  stderr    = 3;
+  message FileContent {
+    string path = 1;
+    bytes  data = 2;
+  }
+  repeated FileContent files = 4;
+}
+
+service Proxy {
+  rpc Exec(ExecRequest) returns (ExecResponse);
+}

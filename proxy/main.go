@@ -3,26 +3,34 @@ package main
 import (
 	"flag"
 	"log"
+	"net"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 
+	"github.com/reyoung/agent-envs/proxy/pkg/api"
+	exec_v1 "github.com/reyoung/agent-envs/proxy/pkg/api/proto/exec.v1"
 	"github.com/reyoung/agent-envs/proxy/pkg/callback"
 	"github.com/reyoung/agent-envs/proxy/pkg/publisher"
 	"github.com/reyoung/agent-envs/proxy/pkg/response_store"
+	"google.golang.org/grpc"
 )
 
 func main() {
 	var (
-		flagListenAddr   = flag.String("listen", ":8080", "HTTP listen address")
-		flagRedisDSN     = flag.String("redis", "", "Redis DSN without queue suffix")
-		flagCallbackBase = flag.String("callback-base-url", "", "Base URL for callback endpoint (e.g. http://proxy:8080)")
+		flagListenAddr         = flag.String("listen", ":8080", "HTTP listen address")
+		flagRedisDSN           = flag.String("redis", "", "Redis DSN without queue suffix")
+		flagCallbackBase       = flag.String("callback-base-url", "", "Base URL for callback endpoint (e.g. http://proxy:8080)")
+		flagCallbackListenAddr = flag.String("callback-listen", ":8090", "Callback HTTP listen address")
 	)
 	flag.Parse()
 
 	if *flagRedisDSN == "" {
 		log.Fatalf("--redis is required")
+	}
+	if *flagCallbackListenAddr == "" {
+		log.Fatalf("--callback-listen is required")
 	}
 	if *flagCallbackBase == "" {
 		log.Fatalf("--callback-base-url is required")
@@ -35,8 +43,8 @@ func main() {
 
 	respStore := response_store.New()
 	defer respStore.Close()
-	publisher, err := publisher.New(*flagRedisDSN)
-	defer publisher.Close()
+	pub, err := publisher.New(*flagRedisDSN)
+	defer pub.Close()
 	if err != nil {
 		log.Fatalf("failed to create publisher: %v", err)
 	}
@@ -44,9 +52,26 @@ func main() {
 	svr := &callback.Server{
 		Store: respStore,
 	}
-	svr.Start(*flagListenAddr)
+	svr.Start(*flagCallbackListenAddr)
 	defer svr.Close()
-	ch := make(chan os.Signal, 1) // 一般给 buffer=1，避免错过
+
+	callbackURL := "http://" + callbackBase + "/callback/"
+	grpcAPISvr := &api.Server{
+		Publisher:   pub,
+		Store:       respStore,
+		CallbackURL: callbackURL,
+	}
+
+	lis, err := net.Listen("tcp", *flagListenAddr)
+	if err != nil {
+		log.Fatalf("failed to listen on %s: %v", *flagListenAddr, err)
+	}
+	grpcSvr := grpc.NewServer()
+	exec_v1.RegisterProxyServer(grpcSvr, grpcAPISvr)
+	go grpcSvr.Serve(lis)
+	defer grpcSvr.Stop()
+
+	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
 	<-ch
 	log.Println("shutting down...")
