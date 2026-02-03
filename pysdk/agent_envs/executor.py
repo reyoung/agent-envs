@@ -3,7 +3,7 @@ from .solutions import Solution
 from .proxy_client import ProxyClient, ExecRequest
 from .binary_builder import build_binary
 from .result_parser import parse_result
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Executor as ConcurrentExecutor
 import asyncio
 
 __all__ = ["Executor"]
@@ -11,7 +11,7 @@ __all__ = ["Executor"]
 
 class Executor:
     def __init__(self, proxy_client: ProxyClient,
-                 build_binary_pool: ThreadPoolExecutor | None = None) -> None:
+                 build_binary_pool: ConcurrentExecutor | None = None) -> None:
         self._queue_names: dict[str, str] = {}
         self._proxy_client = proxy_client
         self._build_binary_pool = build_binary_pool

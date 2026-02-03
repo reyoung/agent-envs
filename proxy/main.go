@@ -67,7 +67,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to listen on %s: %v", *flagListenAddr, err)
 	}
-	grpcSvr := grpc.NewServer()
+	grpcSvr := grpc.NewServer(
+		grpc.MaxRecvMsgSize(16<<20),
+		grpc.MaxSendMsgSize(16<<20),
+	)
 	exec_v1.RegisterProxyServer(grpcSvr, grpcAPISvr)
 	go grpcSvr.Serve(lis)
 	defer grpcSvr.Stop()
