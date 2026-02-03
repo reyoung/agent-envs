@@ -18,6 +18,8 @@ main() {
 
 	root=$(git rev-parse --show-toplevel)
 
+	echo "regenerate protobuf files"
+	buf generate
 	echo "Building linux proxy binary with make"
 	make -C "${root}/proxy" clean
 	make -C "${root}/proxy" linux -j

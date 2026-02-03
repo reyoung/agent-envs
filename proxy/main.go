@@ -55,11 +55,10 @@ func main() {
 	svr.Start(*flagCallbackListenAddr)
 	defer svr.Close()
 
-	callbackURL := "http://" + callbackBase + "/callback/"
 	grpcAPISvr := &api.Server{
 		Publisher:   pub,
 		Store:       respStore,
-		CallbackURL: callbackURL,
+		CallbackURL: callbackBase,
 	}
 
 	lis, err := net.Listen("tcp", *flagListenAddr)
@@ -70,6 +69,7 @@ func main() {
 	exec_v1.RegisterProxyServer(grpcSvr, grpcAPISvr)
 	go grpcSvr.Serve(lis)
 	defer grpcSvr.Stop()
+	log.Printf("gRPC server listening on %s", *flagListenAddr)
 
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
