@@ -45,7 +45,7 @@ spec:
             - |
               /usr/local/bin/proxy \
                 --redis "redis://{{- if .Values.redis_password }}:{{ .Values.redis_password }}@{{- end }}{{ .Values.redis_host }}:{{ .Values.redis_port }}"\
-                --callback-base-url "http://${POD_IP}:8080"
+                --callback-base-url "http://${POD_IP}:8081"
           resources:
             requests:
               cpu: "500m"

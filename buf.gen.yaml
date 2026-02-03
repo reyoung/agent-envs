@@ -1,0 +1,21 @@
+version: v2
+managed:
+  enabled: true
+  override:
+    - file_option: go_package_prefix
+      value: github.com/reyoung/agent-envs/proxy/proto
+plugins:
+    - remote: buf.build/protocolbuffers/go
+      out: proxy/pkg/api/proto
+      opt: paths=source_relative
+    - remote: buf.build/grpc/go:v1.6.0
+      out: proxy/pkg/api/proto
+      opt: paths=source_relative
+    - remote: buf.build/protocolbuffers/python
+      out: pysdk
+    - remote: buf.build/grpc/python
+      out: pysdk
+    - remote: buf.build/protocolbuffers/pyi
+      out: pysdk
+inputs:
+    - directory: proto

@@ -7,6 +7,10 @@ import typing
 import aioautobatch
 import io
 from concurrent.futures import Executor
+import grpc
+from .exec.v1.svr_pb2_grpc import ProxyStub
+from .exec.v1.svr_pb2 import ExecRequest as GRPCExecRequest, ExecResponse as GRPCExecResponse
+
 
 @dataclasses.dataclass(frozen=True)
 class ExecRequest:
@@ -71,6 +75,34 @@ class ProxyClient(typing.Protocol):
 
     async def close(self):
         ...
+
+class _GRPCProxyClient(ProxyClient):
+    def __init__(self, address: str):
+        self._channel = grpc.aio.insecure_channel(target=address)
+        self._stub = ProxyStub(self._channel)
+    
+    async def execute(self, request: ExecRequest) -> ExecResult:
+        grpc_req = GRPCExecRequest(
+            queue_name=request.queue_name,
+            binary=request.binary,
+            capture_pattern=request.capture_pattern or "",
+            args=request.args or [],
+        )
+        grpc_resp: GRPCExecResponse = await self._stub.Exec(grpc_req)
+        
+        return ExecResult(
+            exit_code=grpc_resp.exit_code,
+            stdout=grpc_resp.stdout,
+            stderr=grpc_resp.stderr,
+            files=[
+                FileContent(filename=f.path, content=f.data)
+                for f in grpc_resp.files
+            ],  
+        )
+        
+    
+    async def close(self):
+        await self._channel.close()
 
 def _create_http_client() -> httpx.AsyncClient:
     return httpx.AsyncClient(timeout=httpx.Timeout(60.0, read=1800.0), limits=httpx.Limits(
@@ -224,6 +256,10 @@ class _UnorderedBatchProxyClient(ProxyClient):
 
 
 def create_proxy_client(url: str, executor: Executor | None = None) -> ProxyClient:
+    if url.startswith("grpc://"):
+        address = url[len("grpc://"):]
+        return _GRPCProxyClient(address)
+
     if url.endswith("unordered_batch_execute"):
         return _UnorderedBatchProxyClient(url, executor)
     if url.endswith("batch_execute"):

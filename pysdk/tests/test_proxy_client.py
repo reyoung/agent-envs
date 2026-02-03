@@ -3,7 +3,7 @@ from agent_envs.proxy_client import create_proxy_client, ExecRequest
 
 
 async def test_proxy_client_initialization():
-    cli = create_proxy_client(url="http://localhost:8080/batch_execute")
+    cli = create_proxy_client(url="grpc://localhost:8080")
     try:
         resp = await cli.execute(
             ExecRequest(

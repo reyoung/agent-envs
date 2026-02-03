@@ -18,6 +18,13 @@ main() {
 
 	root=$(git rev-parse --show-toplevel)
 
+	echo "regenerate protobuf files"
+	# Use uv run to make sure pyprotobuf is installed
+	cat << EOF | bash 
+set -xe
+cd pysdk
+uv run bash -c 'cd .. && buf generate'
+EOF
 	echo "Building linux proxy binary with make"
 	make -C "${root}/proxy" clean
 	make -C "${root}/proxy" linux -j
