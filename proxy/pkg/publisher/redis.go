@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -43,6 +44,8 @@ func (p *redisPublisher) Enqueue(ctx context.Context, queue string, spec *jobque
 	if queue == "" {
 		return fmt.Errorf("queue name is empty")
 	}
+
+	log.Printf("enqueue job %s to queue %s, callback url %s", spec.ID, queue, spec.CallbackURL)
 
 	payload, err := json.Marshal(spec)
 	if err != nil {

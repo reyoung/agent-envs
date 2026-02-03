@@ -3,10 +3,12 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log"
 
 	"github.com/google/uuid"
 	"github.com/reyoung/agent-envs/envlet/pkg/jobqueue"
-	exec_v1 "github.com/reyoung/agent-envs/proxy/pkg/api/proto/exec.v1"
+	exec_v1 "github.com/reyoung/agent-envs/proxy/pkg/api/proto/agent_envs/exec/v1"
 	"github.com/reyoung/agent-envs/proxy/pkg/publisher"
 	"github.com/reyoung/agent-envs/proxy/pkg/response_store"
 )
@@ -28,6 +30,8 @@ func (s *Server) Exec(ctx context.Context, req *exec_v1.ExecRequest) (*exec_v1.E
 	if queueName == "" {
 		return nil, ErrEmptyQueueName
 	}
+
+	log.Printf("post job to queue %s", queueName)
 	reqID := uuid.New().String()
 	w, err := s.Store.Waiter(reqID)
 	if err != nil {
@@ -36,7 +40,7 @@ func (s *Server) Exec(ctx context.Context, req *exec_v1.ExecRequest) (*exec_v1.E
 	defer w.Close()
 
 	err = s.Publisher.Enqueue(ctx, queueName, &jobqueue.JobSpec{
-		CallbackURL:    s.CallbackURL,
+		CallbackURL:    fmt.Sprintf("%s/callback/%s", s.CallbackURL, reqID),
 		ID:             reqID,
 		Binary:         req.GetBinary(),
 		CapturePattern: req.GetCapturePattern(),

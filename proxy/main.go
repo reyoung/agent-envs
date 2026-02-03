@@ -10,7 +10,7 @@ import (
 	"syscall"
 
 	"github.com/reyoung/agent-envs/proxy/pkg/api"
-	exec_v1 "github.com/reyoung/agent-envs/proxy/pkg/api/proto/exec.v1"
+	exec_v1 "github.com/reyoung/agent-envs/proxy/pkg/api/proto/agent_envs/exec/v1"
 	"github.com/reyoung/agent-envs/proxy/pkg/callback"
 	"github.com/reyoung/agent-envs/proxy/pkg/publisher"
 	"github.com/reyoung/agent-envs/proxy/pkg/response_store"
@@ -22,9 +22,11 @@ func main() {
 		flagListenAddr         = flag.String("listen", ":8080", "HTTP listen address")
 		flagRedisDSN           = flag.String("redis", "", "Redis DSN without queue suffix")
 		flagCallbackBase       = flag.String("callback-base-url", "", "Base URL for callback endpoint (e.g. http://proxy:8080)")
-		flagCallbackListenAddr = flag.String("callback-listen", ":8090", "Callback HTTP listen address")
+		flagCallbackListenAddr = flag.String("callback-listen", ":8081", "Callback HTTP listen address")
 	)
 	flag.Parse()
+
+	log.Default().SetPrefix("[proxy] ")
 
 	if *flagRedisDSN == "" {
 		log.Fatalf("--redis is required")

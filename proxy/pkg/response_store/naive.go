@@ -3,6 +3,7 @@ package response_store
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -56,6 +57,7 @@ func (s *responseStore) Close() {
 }
 
 func (s *responseStore) Waiter(id string) (Waiter, error) {
+	log.Printf("create waiter for %s", id)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -83,9 +85,13 @@ func (s *responseStore) Waiter(id string) (Waiter, error) {
 }
 
 func (s *responseStore) Deliver(id string, resp model.Response) {
+	var numEntries int
+	defer func() {
+		log.Printf("deliver response for %s, pending %d", id, numEntries-1)
+	}()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
+	numEntries = len(s.entries)
 	entry := s.entries[id]
 	if entry == nil {
 		entry = &storeEntry{}
