@@ -23,7 +23,8 @@ main() {
 	make -C "${root}/proxy" linux -j
 
 	echo "Building ${IMAGE_REPO}:${tag}"
-	docker build -f proxy/Dockerfile -t "${IMAGE_REPO}:${tag}" "${root}"
+	cd proxy
+	docker build -f Dockerfile -t "${IMAGE_REPO}:${tag}" .
 
 	echo "Pushing ${IMAGE_REPO}:${tag}"
 	docker push "${IMAGE_REPO}:${tag}"
