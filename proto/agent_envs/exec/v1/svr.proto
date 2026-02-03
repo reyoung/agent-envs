@@ -1,5 +1,5 @@
 syntax = "proto3";
-package proto;
+package agent_envs.exec.v1;
 
 message ExecRequest {
   string          queue_name      = 1;

@@ -8,7 +8,9 @@ dependencies = [
     "aioautobatch>=0.1.2",
     "aiofiles>=25.1.0",
     "httpx>=0.28.1",
+    "protobuf>=6.33.5",
     "pydantic>=2.12.5",
+    "types-protobuf>=6.32.1.20251210",
 ]
 
 [dependency-groups]
