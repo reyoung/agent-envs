@@ -1,4 +1,6 @@
 import asyncio
+import textwrap
+from agent_envs.binary_builder import shlex_quote
 from agent_envs.proxy_client import create_proxy_client
 from agent_envs.executor import Executor
 from agent_envs.problems import RunProgram, FileContent, CompileIOIBinary
@@ -54,15 +56,17 @@ _T5_SET = set([(2022, "insects"), (2022, "towns"), (2024, "sphinx")])
 class RunProgramWithoutBinary:
     def __init__(
         self,
-        input: str,
-        output: str,
+        problem_id: str,
+        year: int,
+        test_case_name: str,
         time_limit: float | None = None,
         memory_limit_in_mb: int | None = None,
     ) -> None:
         self.time_limit = time_limit
         self.memory_limit_in_mb = memory_limit_in_mb
-        self.input = input
-        self.output = output
+        self.problem_id = problem_id
+        self.year = year
+        self.test_case_name = test_case_name
         self.type: typing.Literal["run_program"] = "run_program"
     
     def _shell(
@@ -75,14 +79,18 @@ class RunProgramWithoutBinary:
         ]
         file_list.append(
             FileContent(
-                filename="input.txt",
-                content=self.input.encode("utf-8"),
-            )
-        )
-        file_list.append(
-            FileContent(
-                filename="output.txt",
-                content=self.output.encode("utf-8"),
+                filename="bootstrap.sh",
+                content= textwrap.dedent(
+                    f"""\
+                    #!/bin/bash
+                    set -e
+                    cd $(dirname $0)
+                    /envlet/ioi_db_lookup test-case -db /envlet/ioi_data.db  \\
+                        -problem {shlex_quote(self.problem_id)} \\
+                        -year {self.year} \\
+                        -test-case-id {shlex_quote(self.test_case_name)} 
+                    """
+                ).encode("utf-8"),                    
             )
         )
         file_list.append(
@@ -96,6 +104,7 @@ class RunProgramWithoutBinary:
             files=file_list,
             time_limit=self.time_limit,
             memory_limit_in_mb=self.memory_limit_in_mb,
+            bootstrap_script="bootstrap.sh",
         )
 
     def build(self, files: dict[CommandType, bytes], problem: IOIProblem) -> RunProgram:
@@ -248,8 +257,9 @@ class OJCheckTasks:
 
 
 def _build_sub_task(
+        problem_id: str,
+        year: int,
     built_test_cases: dict[SubTaskCase, RunTaskCase],
-    test_cases: dict[str, TestCase],
     raw_sub_task: RawSubTask,
 ) -> ParsedSubTask:
     cases: list[SubTaskCase] = []
@@ -262,8 +272,9 @@ def _build_sub_task(
         if case_ not in built_test_cases:
             built_test_cases[case_] = RunTaskCase(
                 problem=RunProgramWithoutBinary(
-                    input=test_cases[test_case_name]["input"],
-                    output=test_cases[test_case_name]["output"],
+                    problem_id=problem_id,
+                    year=year,
+                    test_case_name=case_.test_case_name,
                     time_limit=case_.time_limit,
                     memory_limit_in_mb=int(math.ceil(case_.memory_limit / 1024 / 1024)),
                 ),
@@ -277,10 +288,10 @@ def _build_sub_task(
     )
 
 
-def _build_sub_task_case(test_cases: dict[str, TestCase], sub_tasks: list[RawSubTask]) -> OJCheckTasks:
+def _build_sub_task_case(problem_id:str, year:int, sub_tasks: list[RawSubTask]) -> OJCheckTasks:
     built_test_cases: dict[SubTaskCase, RunTaskCase] = {}
 
-    parsed_sub_tasks = [_build_sub_task(built_test_cases, test_cases, sub_task) for sub_task in sub_tasks]
+    parsed_sub_tasks = [_build_sub_task(problem_id, year, built_test_cases,  sub_task) for sub_task in sub_tasks]
 
     return OJCheckTasks(
         test_cases=built_test_cases,
@@ -322,9 +333,8 @@ class IOIProblem:
             year=self._year,
         )
 
-        test_cases = js["metadata"]["test_cases"]
         sub_tasks = js["metadata"]["sub_tasks"]
-        self._check_tasks = _build_sub_task_case(test_cases, sub_tasks)
+        self._check_tasks = _build_sub_task_case(self._id, self._year,  sub_tasks)
         self._source_file_names = set(sources.keys())
     
     def has_src_file(self, filename: str) -> bool:
