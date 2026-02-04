@@ -8,7 +8,7 @@ from agent_envs.solutions import (
     Solution,
     CompileIOISolution
 )
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, Executor as ConcurrentExecutor
 import json
 import dataclasses
 import typing
@@ -16,6 +16,7 @@ import math
 import enum
 import argparse
 import sys
+import multiprocessing
 
 @dataclasses.dataclass(frozen=True)
 class SubTaskCase:
@@ -447,9 +448,9 @@ T = typing.TypeVar("T")
 
 
 class IOIJudger:
-    def __init__(self, concurrency: int, endpoint: str, num_threads: int) -> None:
+    def __init__(self, concurrency: int, endpoint: str, max_workers: int, executor_cls: type[ConcurrentExecutor] = ThreadPoolExecutor) -> None:
         self._concurrency = asyncio.Semaphore(concurrency)
-        self._thread_pool = ThreadPoolExecutor(max_workers=num_threads)
+        self._thread_pool: ConcurrentExecutor = executor_cls(max_workers) # type: ignore
         self._proxy_client = create_proxy_client(endpoint, executor=self._thread_pool)
         self._executor = Executor(self._proxy_client, build_binary_pool=self._thread_pool)
         self._executor.register_queue("compile_ioi_binary", "gcc_jobs")
@@ -458,6 +459,7 @@ class IOIJudger:
     async def judge(self, line: str, solution: str | None = None) -> IOIJudgeResult:
         loop = asyncio.get_running_loop()
         problem = await loop.run_in_executor(self._thread_pool, IOIProblem, line, solution)
+        
 
         try:
             binaries = await self._compile_problem(problem)
@@ -467,7 +469,6 @@ class IOIJudger:
                 reason=str(e),
             )
         check_results = await self._judge(problem, binaries)
-
         scores = await loop.run_in_executor(self._thread_pool, problem.score, check_results)
         return IOIJudgeResult(
             scores=scores,
@@ -496,8 +497,9 @@ class IOIJudger:
             check_results,
         )
 
+    @staticmethod
     def _parse_judge_results(
-        self, check_results: dict[SubTaskCase, RunProgramSolution]
+        check_results: dict[SubTaskCase, RunProgramSolution]
     ) -> dict[SubTaskCase, JudgeResult]:
         return {k: _parse_result(v) for k, v in check_results.items()}
 
@@ -564,7 +566,7 @@ async def amain():
     parser.add_argument(
         "--endpoint",
         "-e",
-        default="http://127.0.0.1:8080/batch_execute",
+        default="grpc://127.0.0.1:8080",
         help="Proxy execute endpoint.",
     )
     parser.add_argument(
@@ -592,15 +594,16 @@ async def amain():
         type=int,
         default=10,
     )
+    parser.add_argument(
+        "--multi-process",
+        action="store_true",
+        help="Use multi-process executor for CPU-bound work.",
+        default=False,
+    )
 
     args = parser.parse_args()
 
-    num_threads = args.threads if args.threads is not None else args.concurrency
-
-    solution_code: str | None = None
-    if args.solution_file is not None:
-        with open(args.solution_file, "r", encoding="utf-8") as f:
-            solution_code = f.read()
+    num_threads = args.threads if args.threads is not None else multiprocessing.cpu_count()
 
     if args.jsonl == "-":
         lines_iter = sys.stdin
@@ -609,7 +612,9 @@ async def amain():
         lines_iter = open(args.jsonl, "r", encoding="utf-8")
         need_close = True
 
-    judger = IOIJudger(concurrency=args.concurrency, endpoint=args.endpoint, num_threads=num_threads)
+    judger = IOIJudger(concurrency=args.concurrency,
+                    endpoint=args.endpoint, max_workers=num_threads,
+                    executor_cls=ProcessPoolExecutor if args.multi_process else ThreadPoolExecutor)
 
     sem = asyncio.Semaphore(args.line_concurrency)
     

@@ -8,12 +8,12 @@ plugins:
     - remote: buf.build/protocolbuffers/go
       out: proxy/pkg/api/proto
       opt: paths=source_relative
-    - remote: buf.build/grpc/go:v1.6.0
+    - remote: buf.build/grpc/go
       out: proxy/pkg/api/proto
       opt: paths=source_relative
     - remote: buf.build/protocolbuffers/python
       out: pysdk
-    - remote: buf.build/grpc/python
+    - local: protoc-gen-grpclib_python
       out: pysdk
     - remote: buf.build/protocolbuffers/pyi
       out: pysdk

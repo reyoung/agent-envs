@@ -12,6 +12,7 @@ dependencies = [
     "aioautobatch>=0.1.2",
     "aiofiles>=25.1.0",
     "grpcio>=1.76.0",
+    "grpclib[protobuf]>=0.4.9",
     "httpx>=0.28.1",
     "protobuf>=6.33.5",
     "pydantic>=2.12.5",

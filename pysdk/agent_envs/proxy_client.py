@@ -7,8 +7,9 @@ import typing
 import aioautobatch
 import io
 from concurrent.futures import Executor
-import grpc
-from .exec.v1.svr_pb2_grpc import ProxyStub
+import grpclib.client
+import grpclib.config
+from .exec.v1.svr_grpc import ProxyStub
 from .exec.v1.svr_pb2 import ExecRequest as GRPCExecRequest, ExecResponse as GRPCExecResponse
 
 
@@ -78,7 +79,17 @@ class ProxyClient(typing.Protocol):
 
 class _GRPCProxyClient(ProxyClient):
     def __init__(self, address: str):
-        self._channel = grpc.aio.insecure_channel(target=address)
+        MAX_SIZE = 16 * 1024 * 1024  # 16 MB
+        host, port_str = address.split(":")
+        port = int(port_str)
+        self._channel = grpclib.client.Channel(
+            host=host,
+            port=port,
+            config=grpclib.config.Configuration(
+                http2_connection_window_size=MAX_SIZE,
+                http2_stream_window_size=MAX_SIZE,
+            )
+        )
         self._stub = ProxyStub(self._channel)
     
     async def execute(self, request: ExecRequest) -> ExecResult:
@@ -102,7 +113,7 @@ class _GRPCProxyClient(ProxyClient):
         
     
     async def close(self):
-        await self._channel.close()
+        self._channel.close()
 
 def _create_http_client() -> httpx.AsyncClient:
     return httpx.AsyncClient(timeout=httpx.Timeout(60.0, read=1800.0), limits=httpx.Limits(
