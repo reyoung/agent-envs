@@ -11,6 +11,7 @@ import (
 	"math"
 	"os"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -104,6 +105,7 @@ type batchWriter struct {
 	stmtTestCase         *sql.Stmt
 	stmtSubTask          *sql.Stmt
 	stmtSubTaskTestCases *sql.Stmt
+	stmtGraderFile       *sql.Stmt
 	count                int
 }
 
@@ -144,12 +146,21 @@ func initDB(db *sql.DB) {
 	CREATE UNIQUE INDEX IF NOT EXISTS unique_sub_task_problem_name ON sub_tasks (problem_id, name);
 
 	CREATE TABLE IF NOT EXISTS sub_task_test_cases (
-	    id BIGINT PRIMARY KEY,
+		id BIGINT PRIMARY KEY,
 		sub_task_id BIGINT NOT NULL,
 		test_case_id BIGINT NOT NULL,
 		FOREIGN KEY (sub_task_id) REFERENCES sub_tasks(id) ON DELETE CASCADE,
 		FOREIGN KEY (test_case_id) REFERENCES test_cases(id) ON DELETE CASCADE
 	);
+
+	CREATE TABLE IF NOT EXISTS grader_files (
+		id BIGINT PRIMARY KEY,
+		problem_id BIGINT NOT NULL,
+		name VARCHAR(128) NOT NULL,
+		content TEXT NOT NULL,
+		FOREIGN KEY (problem_id) REFERENCES problems(id) ON DELETE CASCADE
+	);
+	CREATE UNIQUE INDEX IF NOT EXISTS unique_grader_file_problem_name ON grader_files (problem_id, name);
 	`)
 	panicIf(err)
 
@@ -182,8 +193,18 @@ func newBatchWriter(db *sql.DB) (*batchWriter, error) {
 		return nil, err
 	}
 
-	stmtSubTaskTestCases, err := tx.Prepare(`INSERT INTO sub_task_test_cases (sub_task_id, test_case_id) VALUES (?, ?)`)
+	stmtSubTaskTestCases, err := tx.Prepare(`INSERT INTO sub_task_test_cases (id, sub_task_id, test_case_id) VALUES (?, ?, ?)`)
 	if err != nil {
+		_ = stmtSubTask.Close()
+		_ = stmtTestCase.Close()
+		_ = stmtProblem.Close()
+		_ = tx.Rollback()
+		return nil, err
+	}
+
+	stmtGraderFile, err := tx.Prepare(`INSERT INTO grader_files (id, problem_id, name, content) VALUES (?, ?, ?, ?)`)
+	if err != nil {
+		_ = stmtSubTaskTestCases.Close()
 		_ = stmtSubTask.Close()
 		_ = stmtTestCase.Close()
 		_ = stmtProblem.Close()
@@ -197,6 +218,7 @@ func newBatchWriter(db *sql.DB) (*batchWriter, error) {
 		stmtTestCase:         stmtTestCase,
 		stmtSubTask:          stmtSubTask,
 		stmtSubTaskTestCases: stmtSubTaskTestCases,
+		stmtGraderFile:       stmtGraderFile,
 	}, nil
 }
 
@@ -218,6 +240,9 @@ func (bw *batchWriter) closeStatements() error {
 	if err := bw.stmtSubTaskTestCases.Close(); err != nil && closeErr == nil {
 		closeErr = err
 	}
+	if err := bw.stmtGraderFile.Close(); err != nil && closeErr == nil {
+		closeErr = err
+	}
 	if err := bw.stmtSubTask.Close(); err != nil && closeErr == nil {
 		closeErr = err
 	}
@@ -230,7 +255,7 @@ func (bw *batchWriter) closeStatements() error {
 	return closeErr
 }
 
-func normalizeRecord(record IOIRecord) (Metadata, []SubTask, map[string]TestCase) {
+func normalizeRecord(record IOIRecord) (Metadata, []SubTask, map[string]TestCase, map[string]string) {
 	meta := record.Metadata
 	if meta.ID == "" && record.ID != "" {
 		meta.ID = record.ID
@@ -248,7 +273,21 @@ func normalizeRecord(record IOIRecord) (Metadata, []SubTask, map[string]TestCase
 		testCases = meta.TestCases
 	}
 
-	return meta, subTasks, testCases
+	graderFiles := record.GraderFiles
+	if len(graderFiles) == 0 && len(meta.GraderFiles) > 0 {
+		graderFiles = meta.GraderFiles
+	}
+
+	return meta, subTasks, testCases, graderFiles
+}
+
+func nextID(db *sql.DB, table string) int64 {
+	var maxID sql.NullInt64
+	row := db.QueryRow(`SELECT COALESCE(MAX(id), 0) FROM ` + table)
+	if err := row.Scan(&maxID); err != nil {
+		panicIf(err)
+	}
+	return maxID.Int64 + 1
 }
 
 func main() {
@@ -276,9 +315,11 @@ func main() {
 
 	reader := bufio.NewReader(inputFile)
 	lineNumber := 0
-	var problemID int64 = 1
-	var testCaseID int64 = 1
-	var subTaskID int64 = 1
+	problemID := nextID(db, "problems")
+	testCaseID := nextID(db, "test_cases")
+	subTaskID := nextID(db, "sub_tasks")
+	subTaskTestCaseID := nextID(db, "sub_task_test_cases")
+	graderFileID := nextID(db, "grader_files")
 
 	for {
 		line, readErr := reader.ReadBytes('\n')
@@ -300,7 +341,7 @@ func main() {
 			log.Panicf("error: line %d: %v", lineNumber, err)
 		}
 
-		meta, subTasks, testCases := normalizeRecord(record)
+		meta, subTasks, testCases, graderFiles := normalizeRecord(record)
 		if meta.ID == "" || meta.Year == 0 {
 			log.Panicf("error: line %d: missing metadata id or year", lineNumber)
 		}
@@ -317,6 +358,21 @@ func main() {
 			panicIf(err)
 			testCaseIDs[name] = currentTestCaseID
 			testCaseID++
+		}
+
+		if len(graderFiles) > 0 {
+			fileNames := make([]string, 0, len(graderFiles))
+			for name := range graderFiles {
+				fileNames = append(fileNames, name)
+			}
+			sort.Strings(fileNames)
+			for _, name := range fileNames {
+				content := graderFiles[name]
+				currentFileID := graderFileID
+				_, err := batch.stmtGraderFile.Exec(currentFileID, currentProblemID, name, content)
+				panicIf(err)
+				graderFileID++
+			}
 		}
 
 		for _, subTask := range subTasks {
@@ -336,8 +392,10 @@ func main() {
 				if !ok {
 					log.Panicf("error: line %d: subtask %q references missing test case %q", lineNumber, subTask.Name, testCaseName)
 				}
-				_, err := batch.stmtSubTaskTestCases.Exec(currentSubTaskID, testID)
+				currentLinkID := subTaskTestCaseID
+				_, err := batch.stmtSubTaskTestCases.Exec(currentLinkID, currentSubTaskID, testID)
 				panicIf(err)
+				subTaskTestCaseID++
 			}
 			subTaskID++
 		}
