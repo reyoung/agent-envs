@@ -81,6 +81,7 @@ class CompileCPP:
 class RunProgram:
     entrypoint: str
     files: list[FileContent]
+    bootstrap_script: str | None = None
     time_limit: float | None = None
     memory_limit_in_mb: int | None = None
     args: list[str] | None = None

@@ -96,6 +96,12 @@ class RunProgramSolution:
     status: RunProgramStatus | None = None
     type: typing.Literal["run_program"] = "run_program"
 
+    def __repr__(self) -> str:
+        return (
+            f"RunProgramSolution(exit_code={self.exit_code}, stdout={self.stdout.decode('utf-8')}, stderr={self.stderr.decode('utf-8')}, "
+            f"memory={self.memory}, time={self.time}, status={self.status})"
+        )
+
 @dataclasses.dataclass(frozen=True)
 class CompileIOISolution:
     binaries: dict[str, bytes]

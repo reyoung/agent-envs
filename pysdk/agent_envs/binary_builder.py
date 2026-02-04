@@ -229,12 +229,24 @@ def _(run_program: RunProgram) -> BuildBinaryResult:
         files.append((file.filename, file.content, 0o755))
     tl = run_program.time_limit if run_program.time_limit is not None else 1
     tl *= 2
+    bootscript_command = ""
+    if run_program.bootstrap_script is not None:
+        bootscript_command = textwrap.dedent(
+            f"""\
+            echo "Running bootstrap script"
+            bash {shlex_quote(run_program.bootstrap_script)}
+            """
+        )
+
     run_script = textwrap.dedent(
         f"""\
         #!/bin/bash
-        set -e
+        set -ex
         cd "$(dirname "$0")"
         ls -lha .
+
+        {bootscript_command}
+
         echo "Running program: {shlex_quote(run_program.entrypoint)}"
         /envlet/runprog \\
             -tl {tl:.4f}s \\
