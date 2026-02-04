@@ -1,6 +1,6 @@
 import json
 from .proxy_client import ExecResult
-from .problems import Problem, CppOJ, CompileCPP, RunProgram
+from .problems import Problem, CppOJ, CompileCPP, RunProgram, CompileIOIBinary
 from .solutions import (
     Solution,
     CppOJSolution,
@@ -8,6 +8,7 @@ from .solutions import (
     CompileSolution,
     RunProgramSolution,
     RunProgramStatus,
+    CompileIOISolution,
 )
 import functools
 
@@ -125,3 +126,9 @@ def _status_from_code(code: int) -> RunProgramStatus:
         7: RunProgramStatus.FATAL_ERROR,
     }
     return mapping.get(code, RunProgramStatus.UNKNOWN)
+
+@parse_result.register
+async def _(compile_ioi_binary: CompileIOIBinary, exec_result: ExecResult) -> Solution:
+    _ensure_succeed(exec_result)
+    files = {k.removeprefix("workspace/"): v for k, v in exec_result.file_dict().items()}
+    return CompileIOISolution(binaries=files)
