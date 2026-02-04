@@ -601,7 +601,14 @@ async def _process_line(lock: asyncio.Lock, lineno: int, line: str, judger: IOIJ
         return False
     return True
 
-
+class _LineDoneCallback:
+    def __init__(self, line_no: int, sem: asyncio.Semaphore) -> None:
+        self._line_no = line_no
+        self._sem = sem
+    
+    def __call__(self, task: asyncio.Task[bool | None]) -> None:
+        self._sem.release()
+        print(f"Line {self._line_no} done.")
 
 async def amain():
     parser = argparse.ArgumentParser(description="Judge IOI-style problems from a JSONL file.")
@@ -674,7 +681,7 @@ async def amain():
         for line_no, raw_line in enumerate(lines_iter, start=1):
             await sem.acquire()
             task = asyncio.create_task(_process_line(dump_lock, line_no, raw_line, judger))
-            task.add_done_callback(lambda _t: sem.release())
+            task.add_done_callback(_LineDoneCallback(line_no=line_no, sem=sem))
             tasks.append(task)
 
         if tasks:
