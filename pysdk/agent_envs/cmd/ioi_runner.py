@@ -1,12 +1,12 @@
 import asyncio
 from agent_envs.proxy_client import create_proxy_client
 from agent_envs.executor import Executor
-from agent_envs.problems import CompileCPP, RunProgram, FileContent
+from agent_envs.problems import RunProgram, FileContent, CompileIOIBinary
 from agent_envs.solutions import (
-    CompileSolution,
     RunProgramSolution,
     RunProgramStatus,
     Solution,
+    CompileIOISolution
 )
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, Executor as ConcurrentExecutor
 import json
@@ -294,89 +294,6 @@ class CommandType(enum.StrEnum):
     MANAGER = "manager"
 
 
-def _build_solution_compile_commands(files: dict[str, str]) -> CompileCPP:
-    """
-    构造Solution的CompileCPP编译命令
-    """
-    sources = [
-        FileContent(
-            filename="solution.cpp",
-            content=files["solution.cpp"].encode("utf-8"),
-        )
-    ]
-    if "grader.cpp" in files:
-        sources.append(
-            FileContent(
-                filename="grader.cpp",
-                content=files["grader.cpp"].encode("utf-8"),
-            )
-        )
-
-    elif "stub.cpp" in files:
-        sources.append(
-            FileContent(
-                filename="stub.cpp",
-                content=files["stub.cpp"].encode("utf-8"),
-            )
-        )
-
-    else:
-        raise RuntimeError("grader.cpp not found in grader files. file names {}".format(list(files.keys())))
-
-    headers = [
-        FileContent(
-            filename=k,
-            content=v.encode("utf-8"),
-        )
-        for k, v in files.items()
-        if k.endswith(".h")
-    ]
-
-    return CompileCPP(
-        files=sources + headers,
-    )
-
-
-def _build_checker_compile_commands(
-    files: dict[str, str],
-) -> typing.Generator[tuple[CommandType, CompileCPP], None, None]:
-    headers = [
-        FileContent(
-            filename=k,
-            content=v.encode("utf-8"),
-        )
-        for k, v in files.items()
-        if k.endswith(".h")
-    ]
-    if "checker.cpp" in files:
-        yield (
-            CommandType.CHECKER,
-            CompileCPP(
-                files=[
-                    FileContent(
-                        filename="checker.cpp",
-                        content=files["checker.cpp"].encode("utf-8"),
-                    )
-                ]
-                + headers,
-            ),
-        )
-
-    if "manager.cpp" in files:
-        yield (
-            CommandType.MANAGER,
-            CompileCPP(
-                files=[
-                    FileContent(
-                        filename="manager.cpp",
-                        content=files["manager.cpp"].encode("utf-8"),
-                    )
-                ]
-                + headers,
-            ),
-        )
-
-
 class ScoreDetail(typing.NamedTuple):
     task_score: float
     test_score: float
@@ -399,8 +316,11 @@ class IOIProblem:
 
         sources["solution.cpp"] = solution
 
-        self._compile_commands = dict(_build_checker_compile_commands(sources))
-        self._compile_commands[CommandType.SOLUTION] = _build_solution_compile_commands(sources)
+        self._compile_command = CompileIOIBinary(
+            solution=solution,
+            problem_id=self._id,
+            year=self._year,
+        )
 
         test_cases = js["metadata"]["test_cases"]
         sub_tasks = js["metadata"]["sub_tasks"]
@@ -418,8 +338,8 @@ class IOIProblem:
     def year(self) -> int:
         return self._year
 
-    def compile_command(self) -> dict[CommandType, CompileCPP]:
-        return self._compile_commands
+    def compile_command(self) -> CompileIOIBinary:
+        return self._compile_command
 
     def check_tasks(self) -> OJCheckTasks:
         return self._check_tasks
@@ -533,7 +453,7 @@ class IOIJudger:
         self._thread_pool: ConcurrentExecutor = executor_cls(max_workers) # type: ignore
         self._proxy_client = create_proxy_client(endpoint, executor=self._thread_pool)
         self._executor = Executor(self._proxy_client, build_binary_pool=self._thread_pool)
-        self._executor.register_queue("compile_cpp", "gcc_jobs")
+        self._executor.register_queue("compile_ioi_binary", "gcc_jobs")
         self._executor.register_queue("run_program", "gcc_jobs")
 
     async def judge(self, line: str, solution: str | None = None) -> IOIJudgeResult:
@@ -584,23 +504,10 @@ class IOIJudger:
         return {k: _parse_result(v) for k, v in check_results.items()}
 
     async def _compile_problem(self, problem: IOIProblem) -> dict[CommandType, bytes]:
-        commands = problem.compile_command()
-        compile_result_tasks: dict[CommandType, asyncio.Task[Solution]] = {
-            k: await self._create_task(self._executor.execute(problem=cmd)) for k, cmd in commands.items()
-        }
-        result: dict[CommandType, bytes] = {}
-        for k, task in compile_result_tasks.items():
-            task = await task
-            if not isinstance(task, CompileSolution):
-                raise RuntimeError(f"Expected CompileSolution, got {type(task)} for {k}.")
-
-            if task.compile_error is not None:
-                raise CompileError(f"Compilation error in {k}:\n{task.compile_error}")
-
-            assert task.binary is not None
-            result[k] = task.binary
-
-        return result
+        command = problem.compile_command()
+        result = await self._executor.execute(command)
+        assert isinstance(result, CompileIOISolution)
+        return {CommandType(k):v for k, v in result.binaries.items()}
 
     async def _create_task(self, coro: asyncio._CoroutineLike[T]) -> asyncio.Task[T]:
         loop = asyncio.get_running_loop()

@@ -7,7 +7,7 @@ import tarfile
 import textwrap
 from typing import Iterable
 
-from .problems import Problem, CppOJ, CompileCPP, RunProgram
+from .problems import Problem, CppOJ, CompileCPP, RunProgram, CompileIOIBinary
 
 
 @dataclasses.dataclass
@@ -257,5 +257,53 @@ def _(run_program: RunProgram) -> BuildBinaryResult:
     return BuildBinaryResult(
         binary=script,
         capture_pattern=r"^workspace/(runprog\.result|program\.stdout|program\.stderr)$",
+        args=["--target", "workspace"],
+    )
+
+
+@build_binary.register
+def _(compile_ioi_binary: CompileIOIBinary) -> BuildBinaryResult:
+    files: list[tuple[str, bytes, int]] = []
+    files.append(("solution.cpp", compile_ioi_binary.solution.encode("utf-8"), 0o644))
+    run_script = textwrap.dedent(
+        f"""\
+        #!/bin/bash
+        set -ex
+        cd "$(dirname "$0")"
+        
+        /envlet/ioi_db_lookup grader-files -db /envlet/ioi_data.db  \\
+            -problem {shlex_quote(compile_ioi_binary.problem_id)} \\
+            -year {compile_ioi_binary.year}
+        
+        solution_sources=()
+        solution_sources+=("solution.cpp")
+
+        if [ -f stub.cpp ]; then
+            solution_sources+=("stub.cpp")
+        elif [ -f grader.cpp ]; then
+            solution_sources+=("grader.cpp")
+        else
+            echo "No stub.cpp or grader.cpp found."
+            exit 1
+        fi
+
+        g++ -O3 -o solution -std=c++17 "${{solution_sources[@]}}" &
+
+        if [ -f checker.cpp ]; then
+            g++ -O3 -o checker -std=c++17 checker.cpp &
+        fi
+
+        if [ -f manager.cpp ]; then
+            g++ -O3 -o manager -std=c++17 manager.cpp &
+        fi
+        wait
+        """
+    )
+    files.append(("run", run_script.encode("utf-8"), 0o755))
+    payload = _tar_gz_bytes(files)
+    script = _self_extracting_script(payload, "./run")
+    return BuildBinaryResult(
+        binary=script,
+        capture_pattern=r"^workspace/(solution|checker|manager)$",
         args=["--target", "workspace"],
     )
