@@ -51,6 +51,7 @@ class ParsedSubTask:
     cases: list[SubTaskCase]
 
 _T5_SET = set([(2022, "insects"), (2022, "towns"), (2024, "sphinx")])
+_T6_SET = set([(2024, "message")])
 
 
 class RunProgramWithoutBinary:
@@ -111,6 +112,9 @@ class RunProgramWithoutBinary:
         if (problem.year, problem.problem_id) in _T5_SET:
             # special handler for some problems
             return self._t5_shell(files, problem)
+        if (problem.year, problem.problem_id) in _T6_SET:
+            # special handler for some problems
+            return self._t6_shell(files, problem)
         if CommandType.CHECKER in files and CommandType.MANAGER not in files:
             return self._shell(files, """#!/bin/bash
 set -e
@@ -241,7 +245,36 @@ wait $SOLUTION_PID
 
 rm ./solution_input.fifo
 rm ./solution_output.fifo
-""")                           
+""")
+    def _t6_shell(
+            self, 
+            files: dict[CommandType, bytes],
+            problem: IOIProblem,
+    ) -> RunProgram:
+        return self._shell(files, textwrap.dedent("""\
+            #!/bin/bash
+            set -e
+            cd $(dirname $0)
+            mkfifo ./solution_input_0.fifo
+            mkfifo ./solution_output_0.fifo
+            mkfifo ./solution_input_1.fifo
+            mkfifo ./solution_output_1.fifo
+
+            ./solution 0 <./solution_input_0.fifo >./solution_output_0.fifo &
+            SOLUTION_0_PID=$!
+            ./solution 1 <./solution_input_1.fifo >./solution_output_1.fifo &
+            SOLUTION_1_PID=$!
+            ./manager ./solution_output_0.fifo ./solution_input_0.fifo ./solution_output_1.fifo ./solution_input_1.fifo < input.txt &
+            MANAGER_PID=$!
+
+            trap "kill -9 $MANAGER_PID; kill -9 $SOLUTION_0_PID; kill -9 $SOLUTION_1_PID" SIGINT
+            trap "kill -9 $MANAGER_PID; kill -9 $SOLUTION_0_PID; kill -9 $SOLUTION_1_PID" SIGTERM
+
+            wait $MANAGER_PID
+            wait $SOLUTION_0_PID
+            wait $SOLUTION_1_PID
+
+            rm ./*.fifo"""))
 
 
 @dataclasses.dataclass(frozen=False)
