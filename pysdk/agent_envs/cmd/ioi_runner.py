@@ -51,6 +51,7 @@ class ParsedSubTask:
     cases: list[SubTaskCase]
 
 _T5_SET = set([(2022, "insects"), (2022, "towns"), (2024, "sphinx")])
+_T6_SET = set([(2024, "message")])
 
 
 class RunProgramWithoutBinary:
@@ -111,6 +112,9 @@ class RunProgramWithoutBinary:
         if (problem.year, problem.problem_id) in _T5_SET:
             # special handler for some problems
             return self._t5_shell(files, problem)
+        if (problem.year, problem.problem_id) in _T6_SET:
+            # special handler for some problems
+            return self._t6_shell(files, problem)
         if CommandType.CHECKER in files and CommandType.MANAGER not in files:
             return self._shell(files, """#!/bin/bash
 set -e
@@ -241,7 +245,36 @@ wait $SOLUTION_PID
 
 rm ./solution_input.fifo
 rm ./solution_output.fifo
-""")                           
+""")
+    def _t6_shell(
+            self, 
+            files: dict[CommandType, bytes],
+            problem: IOIProblem,
+    ) -> RunProgram:
+        return self._shell(files, textwrap.dedent("""\
+            #!/bin/bash
+            set -e
+            cd $(dirname $0)
+            mkfifo ./solution_input_0.fifo
+            mkfifo ./solution_output_0.fifo
+            mkfifo ./solution_input_1.fifo
+            mkfifo ./solution_output_1.fifo
+
+            ./solution 0 <./solution_input_0.fifo >./solution_output_0.fifo &
+            SOLUTION_0_PID=$!
+            ./solution 1 <./solution_input_1.fifo >./solution_output_1.fifo &
+            SOLUTION_1_PID=$!
+            ./manager ./solution_output_0.fifo ./solution_input_0.fifo ./solution_output_1.fifo ./solution_input_1.fifo < input.txt &
+            MANAGER_PID=$!
+
+            trap "kill -9 $MANAGER_PID; kill -9 $SOLUTION_0_PID; kill -9 $SOLUTION_1_PID" SIGINT
+            trap "kill -9 $MANAGER_PID; kill -9 $SOLUTION_0_PID; kill -9 $SOLUTION_1_PID" SIGTERM
+
+            wait $MANAGER_PID
+            wait $SOLUTION_0_PID
+            wait $SOLUTION_1_PID
+
+            rm ./*.fifo"""))
 
 
 @dataclasses.dataclass(frozen=False)
@@ -326,6 +359,9 @@ class IOIProblem:
             assert solution is not None, "Solution code must be provided either in the JSON payload or as an argument."
 
         sources["solution.cpp"] = solution
+        if (self._year,self._id)  == (2023, 'longesttrip'):
+            # patch for missing include
+            solution = "#include <ctime>\n" + solution
 
         self._compile_command = CompileIOIBinary(
             solution=solution,
@@ -517,7 +553,9 @@ class IOIJudger:
         command = problem.compile_command()
         result = await self._executor.execute(command)
         assert isinstance(result, CompileIOISolution)
-        return {CommandType(k):v for k, v in result.binaries.items()}
+        res = {CommandType(k):v for k, v in result.binaries.items()}
+        assert CommandType.SOLUTION in res, "Compiled binaries must include solution."
+        return res
 
     async def _create_task(self, coro: asyncio._CoroutineLike[T]) -> asyncio.Task[T]:
         loop = asyncio.get_running_loop()
@@ -627,25 +665,35 @@ async def amain():
                     executor_cls=ProcessPoolExecutor if args.multi_process else ThreadPoolExecutor)
 
     sem = asyncio.Semaphore(args.line_concurrency)
-    
-    def _done_callback(task: asyncio.Task):
-        sem.release()
-        if not task.result():
-            print("A line failed to judge. See ioi_judge_errors.jsonl for details.", file=sys.stderr)
-            sys.exit(1)
 
     dump_lock = asyncio.Lock()
+    tasks: list[asyncio.Task[bool | None]] = []
+    has_failure = False
 
     try:
         for line_no, raw_line in enumerate(lines_iter, start=1):
             await sem.acquire()
             task = asyncio.create_task(_process_line(dump_lock, line_no, raw_line, judger))
-            task.add_done_callback(_done_callback)
+            task.add_done_callback(lambda _t: sem.release())
+            tasks.append(task)
+
+        if tasks:
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for result in results:
+                if isinstance(result, Exception):
+                    has_failure = True
+                    print(f"Unhandled task exception: {type(result)} {result}", file=sys.stderr)
+                    continue
+                if result is False:
+                    has_failure = True
     finally:
         if need_close:
             lines_iter.close()
         await judger.close()
 
+    if has_failure:
+        print("A line failed to judge. See ioi_judge_errors.jsonl for details.", file=sys.stderr)
+        return 1
     return 0
 
 

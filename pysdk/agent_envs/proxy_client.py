@@ -9,9 +9,10 @@ import io
 from concurrent.futures import Executor
 import grpclib.client
 import grpclib.config
+import grpclib.exceptions
 from .exec.v1.svr_grpc import ProxyStub
 from .exec.v1.svr_pb2 import ExecRequest as GRPCExecRequest, ExecResponse as GRPCExecResponse
-
+import random
 
 @dataclasses.dataclass(frozen=True)
 class ExecRequest:
@@ -78,19 +79,40 @@ class ProxyClient(typing.Protocol):
         ...
 
 class _GRPCProxyClient(ProxyClient):
-    def __init__(self, address: str):
+    def __init__(self, address: str, retry_limit: int = 3, retry_backoff: float = 0.5, retry_jitter: float = 0.1):
         MAX_SIZE = 16 * 1024 * 1024  # 16 MB
         host, port_str = address.split(":")
-        port = int(port_str)
+        self._host = host
+        self._port = int(port_str)
+        self._channel_lock = asyncio.Lock()
         self._channel = grpclib.client.Channel(
-            host=host,
-            port=port,
+            host=self._host,
+            port=self._port,
             config=grpclib.config.Configuration(
                 http2_connection_window_size=MAX_SIZE,
                 http2_stream_window_size=MAX_SIZE,
             )
         )
         self._stub = ProxyStub(self._channel)
+        self._retry_limit = retry_limit
+        self._retry_backoff = retry_backoff
+        self._retry_jitter = retry_jitter
+
+    async def _reconnect(self):
+        async with self._channel_lock:
+            try:
+                self._channel.close()
+            except Exception:
+                pass
+            self._channel = grpclib.client.Channel(
+                host=self._host,
+                port=self._port,
+                config=grpclib.config.Configuration(
+                    http2_connection_window_size=16 * 1024 * 1024,
+                    http2_stream_window_size=16 * 1024 * 1024,
+                ),
+            )
+            self._stub = ProxyStub(self._channel)
     
     async def execute(self, request: ExecRequest) -> ExecResult:
         grpc_req = GRPCExecRequest(
@@ -99,7 +121,21 @@ class _GRPCProxyClient(ProxyClient):
             capture_pattern=request.capture_pattern or "",
             args=request.args or [],
         )
-        grpc_resp: GRPCExecResponse = await self._stub.Exec(grpc_req)
+        to_sleep = 0
+        grpc_resp: GRPCExecResponse | None = None
+        for attempt in range(0, self._retry_limit):
+            try:
+                grpc_resp = await self._stub.Exec(grpc_req)
+                break
+            except (grpclib.exceptions.GRPCError, grpclib.exceptions.StreamTerminatedError, OSError):
+                if attempt == self._retry_limit - 1:
+                    raise
+                else:
+                    await self._reconnect()
+                    increment = self._retry_backoff  + random.uniform(-self._retry_jitter, self._retry_jitter)
+                    to_sleep += increment
+                    await asyncio.sleep(to_sleep)
+        assert grpc_resp is not None
         
         return ExecResult(
             exit_code=grpc_resp.exit_code,
