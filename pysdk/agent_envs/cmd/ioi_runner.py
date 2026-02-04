@@ -326,6 +326,9 @@ class IOIProblem:
             assert solution is not None, "Solution code must be provided either in the JSON payload or as an argument."
 
         sources["solution.cpp"] = solution
+        if (self._year,self._id)  == (2023, 'longesttrip'):
+            # patch for missing include
+            solution = "#include <ctime>\n" + solution
 
         self._compile_command = CompileIOIBinary(
             solution=solution,
@@ -517,7 +520,9 @@ class IOIJudger:
         command = problem.compile_command()
         result = await self._executor.execute(command)
         assert isinstance(result, CompileIOISolution)
-        return {CommandType(k):v for k, v in result.binaries.items()}
+        res = {CommandType(k):v for k, v in result.binaries.items()}
+        assert CommandType.SOLUTION in res, "Compiled binaries must include solution."
+        return res
 
     async def _create_task(self, coro: asyncio._CoroutineLike[T]) -> asyncio.Task[T]:
         loop = asyncio.get_running_loop()
@@ -627,25 +632,35 @@ async def amain():
                     executor_cls=ProcessPoolExecutor if args.multi_process else ThreadPoolExecutor)
 
     sem = asyncio.Semaphore(args.line_concurrency)
-    
-    def _done_callback(task: asyncio.Task):
-        sem.release()
-        if not task.result():
-            print("A line failed to judge. See ioi_judge_errors.jsonl for details.", file=sys.stderr)
-            sys.exit(1)
 
     dump_lock = asyncio.Lock()
+    tasks: list[asyncio.Task[bool | None]] = []
+    has_failure = False
 
     try:
         for line_no, raw_line in enumerate(lines_iter, start=1):
             await sem.acquire()
             task = asyncio.create_task(_process_line(dump_lock, line_no, raw_line, judger))
-            task.add_done_callback(_done_callback)
+            task.add_done_callback(lambda _t: sem.release())
+            tasks.append(task)
+
+        if tasks:
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for result in results:
+                if isinstance(result, Exception):
+                    has_failure = True
+                    print(f"Unhandled task exception: {type(result)} {result}", file=sys.stderr)
+                    continue
+                if result is False:
+                    has_failure = True
     finally:
         if need_close:
             lines_iter.close()
         await judger.close()
 
+    if has_failure:
+        print("A line failed to judge. See ioi_judge_errors.jsonl for details.", file=sys.stderr)
+        return 1
     return 0
 
 

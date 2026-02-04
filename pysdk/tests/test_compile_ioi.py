@@ -9,7 +9,7 @@ async def test_compile():
     cli = create_proxy_client(url="grpc://localhost:8080")
     exec = Executor(cli)
     exec.register_queue("compile_ioi_binary", "gcc_jobs")
-    with open(os.path.join(os.path.dirname(__file__), "cmd", "test_ioi_runner.json"), "r") as f:
+    with open(os.path.join(os.path.dirname(__file__), "cmd", "test_ioi_runner_6.json"), "r") as f:
         json_payload = json.load(f)
     
     problem_id: str = json_payload["metadata"]["id"]
