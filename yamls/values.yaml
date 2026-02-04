@@ -5,4 +5,5 @@ redis_password: ""
 gcc_job_queue: "gcc_jobs"
 envlet_image: "reyoung/envlet:0.1.0"
 proxy_image: "reyoung/proxy:0.1.0"
+ioi_db_lookup_image: "reyoung/ioi_db_lookup:0.1.0"
 proxy_service_type: ClusterIP

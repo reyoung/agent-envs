@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "${ROOT_DIR}/tools/docker/build_and_push_cmds.sh"
+
+IMAGE_REPO=${IMAGE_REPO:-"reyoung/ioi_db_lookup"}
+BASE_TAG=${BASE_TAG:-"0.1.0"}
+TAG_SUFFIX=${TAG_SUFFIX:-""}
+
+main() {
+	local suffix tag
+	if [[ -n "${TAG_SUFFIX}" ]]; then
+		suffix="${TAG_SUFFIX}"
+	else
+		suffix=$(git -C "${ROOT_DIR}" describe --tags --always --dirty)
+		suffix=$(sanitize_tag "${suffix}")
+	fi
+	tag="${BASE_TAG}-${suffix}"
+
+	echo "Building linux ioi_db_lookup binary with make"
+	make -C "${ROOT_DIR}/ioi_db_lookup" clean
+	make -C "${ROOT_DIR}/ioi_db_lookup" build
+
+	local db_source
+	db_source="${ROOT_DIR}/datasets/ioi_data.db"
+	DB_TARGET="${ROOT_DIR}/ioi_db_lookup/ioi_data.db"
+	if [[ ! -f "${db_source}" ]]; then
+		echo "Missing dataset: ${db_source}" >&2
+		exit 1
+	fi
+	trap 'rm -f "${DB_TARGET}"' EXIT
+	cp -f "${db_source}" "${DB_TARGET}"
+
+	echo "Building ${IMAGE_REPO}:${tag}"
+	"${BUILD_CMDS[@]}" \
+		-f "${ROOT_DIR}/ioi_db_lookup/Dockerfile" \
+		-t "${IMAGE_REPO}:${tag}" \
+		"${ROOT_DIR}/ioi_db_lookup"
+
+	echo "Pushing ${IMAGE_REPO}:${tag}"
+	"${PUSH_CMDS[@]}" "${IMAGE_REPO}:${tag}"
+}
+
+sanitize_tag() {
+	local input=$1
+	input=${input//\//-}
+	input=${input//[^0-9A-Za-z_.-]/-}
+	echo "${input}"
+}
+
+main "$@"

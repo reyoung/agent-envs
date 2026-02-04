@@ -17,6 +17,18 @@ spec:
         - name: envlet-bin
           emptyDir: {}
       initContainers:
+        - name: copy-ioi-db-lookup
+          image: "{{ .Values.ioi_db_lookup_image }}"
+          command:
+            - sh
+            - -c
+            - |
+              cp /usr/local/bin/ioi_db_lookup /shared/ioi_db_lookup
+              cp /data/ioi_data.db /shared/ioi_data.db
+          volumeMounts:
+            - name: envlet-bin
+              mountPath: /shared
+
         - name: copy-envlet
           image: "{{ .Values.envlet_image }}"
           command:
