@@ -96,5 +96,10 @@ class RunProgramSolution:
     status: RunProgramStatus | None = None
     type: typing.Literal["run_program"] = "run_program"
 
+@dataclasses.dataclass(frozen=True)
+class CompileIOISolution:
+    binaries: dict[str, bytes]
+    type: typing.Literal["compile_ioi_binary"] = "compile_ioi_binary"
 
-Solution = typing.Union[CppOJSolution, CompileSolution, RunProgramSolution]
+
+Solution = typing.Union[CppOJSolution, CompileSolution, RunProgramSolution, CompileIOISolution]

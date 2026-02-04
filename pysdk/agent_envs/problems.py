@@ -50,6 +50,20 @@ class CppOJ:
             test_cases=[OJTestCase.from_json(tc) for tc in data.get("test_cases", [])],
         )
 
+@dataclasses.dataclass(frozen=True)
+class CompileIOIBinary:
+    solution: str
+    problem_id: str
+    year: int
+    type: typing.Literal["compile_ioi_binary"] = "compile_ioi_binary"
+
+    @classmethod
+    def from_json(cls, data: dict) -> typing.Self:
+        return cls(
+            solution=data["solution"],
+            problem_id=data["problem_id"],
+            year=data["year"],
+        )
 
 @dataclasses.dataclass(frozen=True)
 class CompileCPP:
@@ -83,7 +97,7 @@ class RunProgram:
         )
 
 
-Problem = typing.Union[CppOJ, CompileCPP, RunProgram]
+Problem = typing.Union[CppOJ, CompileCPP, RunProgram, CompileIOIBinary]
 
 
 def problem_from_json(data: dict) -> Problem:
@@ -94,5 +108,7 @@ def problem_from_json(data: dict) -> Problem:
         return CompileCPP.from_json(data)
     elif problem_type == "run_program":
         return RunProgram.from_json(data)
+    elif problem_type == "compile_ioi_binary":
+        return CompileIOIBinary.from_json(data)
     else:
         raise NotImplementedError(f"Unsupported problem type: {problem_type}")
