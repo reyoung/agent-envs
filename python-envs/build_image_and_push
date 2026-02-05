@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "${ROOT_DIR}/tools/docker/build_and_push_cmds.sh"
+
+IMAGE_REPO=${IMAGE_REPO:-"reyoung/py-envs"}
+BASE_TAG=${BASE_TAG:-"0.1.0"}
+TAG_SUFFIX=${TAG_SUFFIX:-""}
+
+main() {
+	local suffix tag
+	if [[ -n "${TAG_SUFFIX}" ]]; then
+		suffix="${TAG_SUFFIX}"
+	else
+		suffix=$(git -C "${ROOT_DIR}" describe --tags --always --dirty)
+		suffix=$(sanitize_tag "${suffix}")
+	fi
+	tag="${BASE_TAG}-${suffix}"
+
+	echo "Building ${IMAGE_REPO}:${tag}"
+	"${BUILD_CMDS[@]}" \
+		-f "${ROOT_DIR}/python-envs/Dockerfile" \
+		-t "${IMAGE_REPO}:${tag}" \
+		"${ROOT_DIR}/python-envs"
+
+	echo "Pushing ${IMAGE_REPO}:${tag}"
+	"${PUSH_CMDS[@]}" "${IMAGE_REPO}:${tag}"
+}
+
+sanitize_tag() {
+	local input=$1
+	input=${input//\//-}
+	input=${input//[^0-9A-Za-z_.-]/-}
+	echo "${input}"
+}
+
+main "$@"

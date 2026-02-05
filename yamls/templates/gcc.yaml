@@ -41,6 +41,20 @@ spec:
           volumeMounts:
             - name: envlet-bin
               mountPath: /shared
+        - name: copy-py-envs
+          image: "{{ .Values.py_envs_image }}"
+          command:
+            - sh
+            - -c
+            - |
+              set -xe
+              cp -r /envs /shared/envs
+              cd /shared/envs
+              tar -xvf py-3.13-env.tar.gz
+              rm py-3.13-env.tar.gz
+          volumeMounts:
+            - name: envlet-bin
+              mountPath: /shared
       containers:
         - name: gcc-oj
           image: "gcc:15"
