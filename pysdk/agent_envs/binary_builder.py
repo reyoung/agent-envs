@@ -237,6 +237,11 @@ def _(run_program: RunProgram) -> BuildBinaryResult:
             bash {shlex_quote(run_program.bootstrap_script)}
             """
         )
+    if run_program.extra_ro_binds is not None:
+        bind_str = ";".join(map(str, run_program.extra_ro_binds))
+        bind_cmd = "--extra-ro-binds " + shlex_quote(bind_str)
+    else:
+        bind_cmd = ""
 
     run_script = textwrap.dedent(
         f"""\
@@ -257,6 +262,7 @@ def _(run_program: RunProgram) -> BuildBinaryResult:
             -unsafe \\
             -cgroup \\
             -bind-pwd \\
+            {bind_cmd} \\
             $PWD/{shlex_quote(run_program.entrypoint)} 1> program.stdout 2> program.stderr
         """
     ).encode("utf-8")

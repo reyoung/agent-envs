@@ -76,6 +76,14 @@ class CompileCPP:
             files=[FileContent.from_json(f) for f in data.get("files", [])],
         )
 
+@dataclasses.dataclass(frozen=True)
+class Bind:
+    source: str
+    target: str
+
+    def __str__(self) -> str:
+        return f"{self.source}:{self.target}"
+
 
 @dataclasses.dataclass(frozen=True)
 class RunProgram:
@@ -85,6 +93,7 @@ class RunProgram:
     time_limit: float | None = None
     memory_limit_in_mb: int | None = None
     args: list[str] | None = None
+    extra_ro_binds: list[Bind] | None = None
     type: typing.Literal["run_program"] = "run_program"
 
     @classmethod
@@ -95,6 +104,7 @@ class RunProgram:
             time_limit=data.get("time_limit"),
             memory_limit_in_mb=data.get("memory_limit_in_mb"),
             args=data.get("args"),
+            extra_ro_binds=[Bind(**b) for b in data.get("extra_ro_binds", [])] if data.get("extra_ro_binds") else None,
         )
 
 
