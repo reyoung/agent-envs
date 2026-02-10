@@ -8,3 +8,4 @@ proxy_image: "reyoung/proxy:0.1.0"
 ioi_db_lookup_image: "reyoung/ioi_db_lookup:0.1.0"
 proxy_service_type: ClusterIP
 py_envs_image: "reyoung/py-envs:0.1.0"
+cf_case_image: "reyoung/codeforces_bin:0.1.0"

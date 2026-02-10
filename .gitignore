@@ -1,1 +1,4 @@
 ioi_db_lookup/bin/ioi_db_lookup
+datasets/codeforces_problems.jsonl
+tools/codeforces_bin/cmd/cf_case/data/codeforces_problems.bin
+tools/codeforces_bin/bin/cf_case

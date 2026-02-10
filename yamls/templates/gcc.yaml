@@ -29,6 +29,17 @@ spec:
             - name: envlet-bin
               mountPath: /shared
 
+        - name: copy-cf-case
+          image: "{{ .Values.cf_case_image }}"
+          command:
+            - sh
+            - -c
+            - |
+              cp /usr/local/bin/cf_case /shared/cf_case
+          volumeMounts:
+            - name: envlet-bin
+              mountPath: /shared
+
         - name: copy-envlet
           image: "{{ .Values.envlet_image }}"
           command:
@@ -77,6 +88,7 @@ spec:
               chmod +x /envlet/envlet
               chmod +x /envlet/judgelet
               chmod +x /envlet/runprog
+              chmod +x /envlet/cf_case
               exec /envlet/envlet "${ENVLET_GCC_REDIS_DSN}"
           volumeMounts:
             - name: envlet-bin
